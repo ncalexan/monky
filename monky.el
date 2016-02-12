@@ -734,6 +734,7 @@ FUNC should leave point at the end of the modified region"
     (define-key map (kbd "B") 'monky-backout-item)
     (define-key map (kbd "i") 'monky-qimport-item)
     (define-key map (kbd "E") 'monky-histedit-item)
+    (define-key map (kbd "r") 'monky-rebase-item)
     map))
 
 (defvar monky-blame-mode-map
@@ -1530,6 +1531,12 @@ With a prefix argument, visit in other window."
 (defun monky-histedit (node)
   (interactive (list (monky-read-revision "Edit history starting from: ")))
   (monky-run-hg-async "histedit" "--rev" node "--config" "ui.interface.histedit=text"))
+
+(defun monky-rebase (source dest)
+  (interactive (list
+                (monky-read-revision "Rebase source: ")
+                (monky-read-revision "Onto dest: ")))
+  (monky-run-hg-async "rebase" "-s" source "-d" dest "--tool" ":merge3"))
 
 (defun monky-reset-tip ()
   (interactive)
@@ -2738,6 +2745,22 @@ With a non numeric prefix ARG, show all entries"
      (monky-histedit (monky-section-info (monky-current-section))))
     ((log commits commit)
      (monky-histedit (monky-section-info (monky-current-section))))))
+
+(defun monky-rebase-item (dest)
+  "Rebase the revision represented by current item."
+  (interactive
+   (list
+    (monky-read-revision (format "Rebase source %s onto dest : "
+                         (monky-section-case "rebase"
+                           ((branch)
+                            (monky-section-info (monky-current-section)))
+                           ((log commits commit)
+                            (monky-section-info (monky-current-section))))))))
+  (monky-section-action "rebase"
+    ((branch)
+     (monky-rebase (monky-section-info (monky-current-section)) dest))
+    ((log commits commit)
+     (monky-rebase (monky-section-info (monky-current-section)) dest))))
 
 ;;; Queue mode
 (define-minor-mode monky-queue-mode
