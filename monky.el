@@ -2036,7 +2036,7 @@ CALLBACK is called with the status and the associated filename."
 
 (defun monky-insert-diff (file &optional status cmd)
   (let ((p (point)))
-    (monky-hg-insert (list (or cmd "diff") file))
+    (monky-hg-insert (list (or cmd "diff") "--unified" "4" file))
     (if (not (eq (char-before) ?\n))
         (insert "\n"))
     (save-restriction
@@ -2246,11 +2246,12 @@ This is naive and assumes that shelf names never contain (."
           (progn
             (monky-insert-merged-files)
             (monky-insert-resolved-files))
-        (monky-insert-untracked-files)
+        ;; (monky-insert-untracked-files)
         (monky-insert-missing-files)
         (monky-insert-changes)
         (monky-insert-staged-changes)
-        (monky-insert-shelves)))))
+        ;; (monky-insert-shelves)
+        ))))
 
 (define-minor-mode monky-status-mode
   "Minor mode for hg status.
