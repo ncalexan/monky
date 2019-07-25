@@ -316,6 +316,18 @@ Many Monky faces inherit from this one by default."
   "Face for phase label shown in log buffer."
   :group 'monky-faces)
 
+(defface monky-log-head-label-obsolete
+  '((((class color) (background light))
+     :box t
+     :background "OrangeRed1"
+     :foreground "OrangeRed4")
+    (((class color) (background dark))
+     :box t
+     :background "OrangeRed1"
+     :foreground "OrangeRed4"))
+  "Face for obsolete label shown in log buffer."
+  :group 'monky-faces)
+
 (defface monky-log-date
   '((t :weight bold :inherit monky-header))
   "Face for date in log."
@@ -2301,7 +2313,7 @@ PROPERTIES is the arguments for the function `propertize'."
                             (list (apply #'propertize l properties) " ")))
                         label-list))))
 
-(defun monky-present-log-line (width graph id branches tags bookmarks phase author date message)
+(defun monky-present-log-line (width graph id branches tags bookmarks phase author date obsolete message)
   (let* ((hg-info (concat
                    (propertize (substring id 0 8) 'face 'monky-log-sha1)
                    " "
@@ -2310,7 +2322,9 @@ PROPERTIES is the arguments for the function `propertize'."
                    (monky-propertize-labels tags 'face 'monky-log-head-label-tags)
                    (monky-propertize-labels bookmarks 'face 'monky-log-head-label-bookmarks)
                    (unless (or (string= phase "") (string= phase "public"))
-                     (monky-propertize-labels `(,phase) 'face 'monky-log-head-label-phase))))
+                     (monky-propertize-labels `(,phase) 'face 'monky-log-head-label-phase))
+                   (unless (or (string= obsolete "") (string= obsolete "stable"))
+                     (monky-propertize-labels `(,obsolete) 'face 'monky-log-head-label-obsolete))))
          (total-space-left (max 0 (- width (length hg-info))))
          (author-date-space-taken (+ 16 (min 10 (length author))))
          (message-space-left (number-to-string (max 0 (- total-space-left author-date-space-taken 1))))
@@ -2354,9 +2368,12 @@ PROPERTIES is the arguments for the function `propertize'."
       (monky-mode-init topdir 'log (monky-refresh-log-buffer revs path))
       (monky-log-mode t))))
 
+(defvar monky-log-graph-node-re
+  "^\\([\\/@ox\\*+-|\s]+\s*\\)")
+
 (defvar monky-log-graph-re
   (concat
-   "^\\([-_\\/@o+|\s]+\s*\\) "          ; 1. graph
+   monky-log-graph-node-re " "          ; 1. graph node
    "\\([a-z0-9]\\{40\\}\\) "            ; 2. id
    "<branches>\\(.?*\\)</branches>"     ; 3. branches
    "<tags>\\(.?*\\)</tags>"             ; 4. tags
@@ -2364,7 +2381,8 @@ PROPERTIES is the arguments for the function `propertize'."
    "<phase>\\(.?*\\)</phase>"           ; 6. phase
    "<author>\\(.*?\\)</author>"         ; 7. author
    "<monky-date>\\([0-9]+\\).?*</monky-date>" ; 8. date
-   "\\(.*\\)$"                          ; 9. msg
+   "<obsolete>\\(.?*\\)</obsolete>"     ; 9. obsolete
+   "\\(.*\\)$"                          ; 10. msg
    ))
 
 (defun monky-decode-xml-entities (str)
@@ -2417,7 +2435,8 @@ Example:
             (phase (match-string 6))
             (author (monky--author-name (match-string 7)))
             (date (format-time-string "%Y-%m-%d" (seconds-to-time (string-to-number (match-string 8)))))
-            (msg (match-string 9)))
+            (obsolete (match-string 9))
+            (msg (match-string 10)))
         (monky-delete-line)
         (monky-with-section id 'commit
           (insert (monky-present-log-line
@@ -2429,11 +2448,12 @@ Example:
                    (monky-decode-xml-entities phase)
                    (monky-decode-xml-entities author)
                    (monky-decode-xml-entities date)
+                   (monky-decode-xml-entities obsolete)
                    (monky-decode-xml-entities msg)))
           (monky-set-section-info id)
           (when monky-log-count (cl-incf monky-log-count))
           (forward-line)
-          (when (looking-at "^\\([\\/@o+-|\s]+\s*\\)$")
+          (when (looking-at (concat monky-log-graph-node-re "$"))
             (let ((graph (match-string 1)))
               (insert "         ")
               (forward-line))))
