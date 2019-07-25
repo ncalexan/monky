@@ -728,6 +728,7 @@ FUNC should leave point at the end of the modified region"
 
 (defvar monky-log-mode-map
   (let ((map (make-keymap)))
+    (define-key map (kbd "C-w") 'monky-copy-section-value)
     (define-key map (kbd "e") 'monky-log-show-more-entries)
     (define-key map (kbd "C") 'monky-checkout-item)
     (define-key map (kbd "M") 'monky-merge-item)
@@ -744,6 +745,7 @@ FUNC should leave point at the end of the modified region"
 
 (defvar monky-branches-mode-map
   (let ((map (make-keymap)))
+    (define-key map (kbd "C-w") 'monky-copy-section-value)
     (define-key map (kbd "C") 'monky-checkout-item)
     (define-key map (kbd "M") 'monky-merge-item)
     map))
@@ -3316,6 +3318,26 @@ Brings up a buffer to allow editing of commit message."
       (cl-loop for mb in monky-buffers
                do
                (kill-buffer mb)))))
+
+;;;###autoload
+(defun monky-copy-section-value ()
+  "Save the value of the current section for later use.
+
+Save the section value to the `kill-ring'.
+
+When the region is active, then save that to the `kill-ring',
+like `kill-ring-save' would, instead of behaving as described
+above."
+  (interactive)
+  (cond
+   ((use-region-p)
+    (copy-region-as-kill nil nil 'region))
+   (t
+    (monky-section-action "copy-section-value"
+      ((branch)
+       (kill-new (message "%s" (monky-section-info (monky-current-section)))))
+      ((log commits commit)
+       (kill-new (message "%s" (monky-section-info (monky-current-section)))))))))
 
 (provide 'monky)
 
