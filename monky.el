@@ -735,6 +735,7 @@ FUNC should leave point at the end of the modified region"
     (define-key map (kbd "i") 'monky-qimport-item)
     (define-key map (kbd "E") 'monky-histedit-item)
     (define-key map (kbd "r") 'monky-rebase-item)
+    (define-key map (kbd "u") 'monky-prune-item)
     map))
 
 (defvar monky-blame-mode-map
@@ -2761,6 +2762,22 @@ With a non numeric prefix ARG, show all entries"
      (monky-rebase (monky-section-info (monky-current-section)) dest))
     ((log commits commit)
      (monky-rebase (monky-section-info (monky-current-section)) dest))))
+
+(defun monky-prune (node-1 &optional node-2)
+  "Prune revision NODE-1 or topological revision range NODE-1::NODE-2."
+  (monky-run-hg "prune" "--rev"
+                (if node-2 (concat node-1 "::" node-2) node-1)))
+
+(defun monky-prune-item ()
+  "Prune the revision(s) represented by the current item or region."
+  (interactive)
+  (monky-section-action "prune"
+    ((log commits commit)
+     (if (region-active-p)
+	       (monky-prune
+	        (monky-section-info (monky-section-at (monky-next-sha1 (region-beginning))))
+	        (monky-section-info (monky-section-at (monky-previous-sha1 (- (region-end) 1)))))
+       (monky-prune (monky-section-info (monky-current-section)))))))
 
 ;;; Queue mode
 (define-minor-mode monky-queue-mode
