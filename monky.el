@@ -1637,6 +1637,21 @@ With a prefix argument, visit in other window."
      (when (yes-or-no-p (format "Delete %s? " (monky-section-info (monky-current-section))))
        (delete-file (monky-section-info (monky-current-section)))
        (monky-refresh-buffer)))
+    ((hunk)
+     (let* ((file (monky-diff-item-file (monky-hunk-item-diff (monky-current-section))))
+            (target (find-file-noselect file))
+            (dffn (lambda (&rest r) file))
+            (reverse t))
+       (with-current-buffer target
+         ;; There's wiggle room here (no pun intended): perhaps query
+         ;; the user if they want to try discarding the hunk anyway?
+         (when (buffer-modified-p)
+           (user-error "Cannot discard hunk: buffer has been modified")))
+       (cl-letf (((symbol-function 'diff-find-file-name) dffn))
+         (diff-apply-hunk reverse))
+       (with-current-buffer target
+         (basic-save-buffer))
+       (monky-refresh-buffer)))
     ((changes diff)
      (monky-revert-file (monky-diff-item-file (monky-current-section))))
     ((staged diff)
