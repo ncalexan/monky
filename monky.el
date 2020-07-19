@@ -290,11 +290,6 @@ Many Monky faces inherit from this one by default."
   "Face for tag labels shown in log buffer."
   :group 'monky-faces)
 
-(defface monky-queue-patch
-  '((t :weight bold :inherit (monky-header highlight)))
-  "Face for patch name"
-  :group 'monky-faces)
-
 (defface monky-log-head-label-bookmarks
   '((((class color) (background light))
      :box t
@@ -336,42 +331,6 @@ Many Monky faces inherit from this one by default."
   "Face for date in log."
   :group 'monky-faces)
 
-(defface monky-queue-active
-  '((((class color) (background light))
-     :box t
-     :background "light green"
-     :foreground "dark olive green")
-    (((class color) (background dark))
-     :box t
-     :background "light green"
-     :foreground "dark olive green"))
-  "Face for active patch queue"
-  :group 'monky-faces)
-
-(defface monky-queue-positive-guard
-  '((((class color) (background light))
-     :box t
-     :background "light green"
-     :foreground "dark olive green")
-    (((class color) (background dark))
-     :box t
-     :background "light green"
-     :foreground "dark olive green"))
-  "Face for queue postive guards"
-  :group 'monky-faces)
-
-(defface monky-queue-negative-guard
-  '((((class color) (background light))
-     :box t
-     :background "IndianRed1"
-     :foreground "IndianRed4")
-    (((class color) (background dark))
-     :box t
-     :background "IndianRed1"
-     :foreground "IndianRed4"))
-  "Face for queue negative guards"
-  :group 'monky-faces)
-
 (defvar monky-mode-hook nil
   "Hook run by `monky-mode'.")
 
@@ -383,7 +342,7 @@ Many Monky faces inherit from this one by default."
 
 (cl-eval-when (load eval)
   (require 'monky-margin)
-  (require 'monky-queue))
+  (require 'monky-queue)
   (require 'monky-shelve))
 
 ;;; Utilities
@@ -775,24 +734,6 @@ FUNC should leave point at the end of the modified region"
 
 (defvar monky-commit-mode-map
   (let ((map (make-keymap)))
-    map))
-
-(defvar monky-queue-mode-map
-  (let ((map (make-keymap)))
-    (define-key map (kbd "u") 'monky-qpop-item)
-    (define-key map (kbd "U") 'monky-qpop-all)
-    (define-key map (kbd "s") 'monky-qpush-item)
-    (define-key map (kbd "S") 'monky-qpush-all)
-    (define-key map (kbd "r") 'monky-qrefresh)
-    (define-key map (kbd "R") 'monky-qrename-item)
-    (define-key map (kbd "k") 'monky-qremove-item)
-    (define-key map (kbd "N") 'monky-qnew)
-    (define-key map (kbd "f") 'monky-qfinish-item)
-    (define-key map (kbd "F") 'monky-qfinish-applied)
-    (define-key map (kbd "d") 'monky-qfold-item)
-    (define-key map (kbd "G") 'monky-qguard-item)
-    (define-key map (kbd "o") 'monky-qreorder)
-    (define-key map (kbd "A") 'monky-addremove-all)
     map))
 
 (defvar monky-pre-log-edit-window-configuration nil)
