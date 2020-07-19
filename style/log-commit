@@ -1,0 +1,11 @@
+%include /usr/local/Cellar/mercurial/5.4/lib/python3.8/site-packages/mercurial/templates/map-cmdline.default
+
+changeset_debug = '{fullcset}{branches}{bookmarks}{tags}{lphase}{parents}{lpredecessors}{lsuccessors}{manifest}{luser}{ldate}{ltroubles}{lobsfate}{lfile_mods}{lfile_adds}{lfile_dels}{lfile_copies_switch}{extras}{description}\n'
+
+lpredecessors = '{if(predecessors,
+               label("ui.note log.predecessors",
+                     "predecessors:{predecessors}\n"))}'
+
+lsuccessors = '{if(successors,
+               label("ui.note log.successors",
+                     "successors  :{successors}\n"))}'

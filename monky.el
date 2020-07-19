@@ -25,12 +25,15 @@
 
 ;;; Code:
 
-(require 'cl-lib)
 (require 'bindat)
+(require 'cl-lib)
+(require 'dash)
 (require 'ediff)
+(require 'f)
 (require 'subr-x)
 (require 'view)
 (require 'tramp)
+(require 'transient)
 (require 'with-editor)
 
 (defgroup monky nil
@@ -48,7 +51,7 @@
   :group 'monky
   :type '(repeat string))
 
-(defcustom monky-hg-process-environment '("TERM=dumb" "HGPLAIN=" "LANGUAGE=C")
+(defcustom monky-hg-process-environment '("TERM=dumb" "HGPLAINEXCEPT=status" "LANGUAGE=C")
   "Default environment variables for hg."
   :group 'monky
   :type '(repeat string))
@@ -97,10 +100,10 @@ Only considered when moving past the last entry with `monky-goto-next-section'."
   :group 'monky
   :type 'boolean)
 
-(defcustom monky-incoming-repository "default"
-  "The repository from which changes are pulled from by default."
-  :group 'monky
-  :type 'string)
+;; (defcustom monky-incoming-repository "default"
+;;   "The repository from which changes are pulled from by default."
+;;   :group 'monky
+;;   :type 'string)
 
 (defcustom monky-outgoing-repository ""
   "The repository to which changes are pushed to by default."
@@ -378,6 +381,11 @@ Many Monky faces inherit from this one by default."
 
 ;;; Compatibilities
 
+(cl-eval-when (load eval)
+  (require 'monky-margin)
+  (require 'monky-queue))
+  (require 'monky-shelve))
+
 ;;; Utilities
 
 (defmacro monky-with-process-environment (&rest body)
@@ -597,6 +605,7 @@ refreshes buffers."
 This function either calls `monky-cmdserver-process-file' or
 `monky-process-file-single' depending on whether the hg
 command-server should be used."
+  (message "monky-process-file: %s" args)
   (apply (cond
           (monky-cmd-process #'monky-cmdserver-process-file)
           ;; ((eq monky-process-type 'cmdserver)
@@ -702,9 +711,7 @@ FUNC should leave point at the end of the modified region"
     (define-key map (kbd "g") 'monky-refresh)
     (define-key map (kbd "$") 'monky-display-process)
     (define-key map (kbd ":") 'monky-hg-command)
-    (define-key map (kbd "l l") 'monky-log-current-branch)
-    (define-key map (kbd "l a") 'monky-log-all)
-    (define-key map (kbd "l r") 'monky-log-revset)
+    (define-key map (kbd "l") 'monky-log)
     (define-key map (kbd "b") 'monky-branches)
     (define-key map (kbd "Q") 'monky-queue)
     (define-key map (kbd "q") 'monky-quit-window)
@@ -721,8 +728,8 @@ FUNC should leave point at the end of the modified region"
     (define-key map (kbd "S") 'monky-stage-all)
     (define-key map (kbd "u") 'monky-unstage-item)
     (define-key map (kbd "U") 'monky-unstage-all)
-    (define-key map (kbd "a") 'monky-commit-amend)
-    (define-key map (kbd "c") 'monky-log-edit)
+    ;; (define-key map (kbd "a") 'monky-commit-amend)
+    (define-key map (kbd "c") 'monky-commit)
     (define-key map (kbd "e") 'monky-ediff-item)
     (define-key map (kbd "y") 'monky-bookmark-create)
     (define-key map (kbd "C") 'monky-checkout)
@@ -732,10 +739,13 @@ FUNC should leave point at the end of the modified region"
     (define-key map (kbd "f") 'monky-pull)
     (define-key map (kbd "k") 'monky-discard-item)
     (define-key map (kbd "m") 'monky-resolve-item)
+    (define-key map (kbd "r") 'monky-rebase)
     (define-key map (kbd "x") 'monky-unresolve-item)
     (define-key map (kbd "X") 'monky-reset-tip)
     (define-key map (kbd "A") 'monky-addremove-all)
     (define-key map (kbd "L") 'monky-rollback)
+    ;; TODO: make this contingent on the shelve extension.
+    (define-key map (kbd "z") 'monky-shelve)
     map))
 
 (defvar monky-log-mode-map
@@ -747,7 +757,7 @@ FUNC should leave point at the end of the modified region"
     (define-key map (kbd "B") 'monky-backout-item)
     (define-key map (kbd "i") 'monky-qimport-item)
     (define-key map (kbd "E") 'monky-histedit-item)
-    (define-key map (kbd "r") 'monky-rebase-item)
+    (define-key map (kbd "r") 'monky-rebase)
     (define-key map (kbd "R") 'monky-mozilla-review-item)
     (define-key map (kbd "u") 'monky-prune-item)
     map))
@@ -918,7 +928,9 @@ WASHER is a function that will be run after CMD.
 The buffer will be narrowed to the inserted text.
 It should add sectioning as needed for monky interaction
 
-CMD is an external command that will be run with ARGS as arguments"
+CMD is either a string, an external command that will be run with
+ARGS as arguments; or a function, that will be applied with ARGS
+as arguments."
   (monky-with-process
     (let* ((body-beg nil)
            (section-title (if (consp section-title-and-type)
@@ -931,7 +943,9 @@ CMD is an external command that will be run with ARGS as arguments"
                       (if buffer-title
                           (insert (propertize buffer-title 'face 'monky-section-title) "\n"))
                       (setq body-beg (point))
-                      (apply 'monky-process-file cmd nil t nil args)
+                      (if (functionp cmd)
+                          (apply cmd args)
+                        (apply 'monky-process-file cmd nil t nil args))
                       (if (not (eq (char-before) ?\n))
                           (insert "\n"))
                       (if washer
@@ -1306,6 +1320,7 @@ CMD is an external command that will be run with ARGS as arguments"
               nil nil nil t))
 
 (defun monky-run-async-with-input (input cmd &rest args)
+  (message "hg: %S" (cons cmd args))
   (monky-run* (cons cmd args) nil nil nil t input))
 
 (defun monky-display-process ()
@@ -1502,14 +1517,64 @@ With a prefix argument, visit in other window."
 
 ;;; Updating
 
-(defun monky-pull ()
+(defun monky-hg-pull (args)
   "Run hg pull. The monky-pull-args variable contains extra arguments to pass to hg."
-  (interactive)
-  (let ((remote (if current-prefix-arg
-                    (monky-read-remote "Pull from : ")
-                  monky-incoming-repository)))
+  ;; (let ((remote (if current-prefix-arg
+  ;;                   (monky-read-remote "Pull from : ")
+  ;;                 monky-incoming-repository)))
     (apply #'monky-run-hg-async
-	   "pull" (append monky-pull-args (list remote)))))
+	   "pull" (append monky-pull-args args)))
+
+;;;###autoload (autoload 'monky-pull "monky" nil t)
+(define-transient-command monky-pull ()
+  "Pull changes from a remote repository to a local one."
+  ;; :info-manual "(magit)Initiating a Commit"
+  ;; :man-page "git-commit"
+  ["Arguments"
+   ("-u" "Update"     "--update")
+   ("=e" "Rebase"     "--rebase")
+   ("-r" "Revision"   "--rev")
+   ("-b" "Branch"     "--branch")
+   ("-B" "Bookmark"   "--bookmark")
+  ]
+  [["Actions"
+    ("p" "Default"          monky-pull-default)
+    ("o" "Other"            monky-pull-other)
+   ]]
+  ;; ["Edit"
+  ;;  ("f" "Fixup"          magit-commit-fixup)
+  ;;  ("s" "Squash"         magit-commit-squash)
+  ;;  ("A" "Augment"        magit-commit-augment)
+  ;;  (6 "x" "Absorb changes" magit-commit-absorb)]
+  ;; [""
+  ;;  ("F" "Instant fixup"  magit-commit-instant-fixup)
+  ;;  ("S" "Instant squash" magit-commit-instant-squash)]
+  ;; ]
+;; (when (not (or monky-staged-files (monky-merge-p)))
+;;   (if (y-or-n-p "Nothing staged. Stage and commit all changes? ")
+;;       (monky-stage-all)
+;;     (user-error "Nothing staged")))
+)
+
+(defun monky-pull-arguments ()
+  (transient-args 'monky-pull))
+
+(defun monky-pull-default (args)
+  (interactive (list
+                (monky-pull-arguments)))
+  (monky-hg-pull args))
+
+(defun monky-pull-other (args remote)
+  (interactive (list
+                (monky-pull-arguments)
+                (monky-read-remote "Pull from: ")
+                ))
+  (monky-hg-pull (append args (list remote))))
+
+  ;; (let ((remote (if current-prefix-arg
+  ;;                   (monky-read-remote "Pull from : ")
+  ;;                 monky-incoming-repository)))
+
 
 (defun monky-remotes ()
   (mapcar #'car (monky-hg-config-section "paths")))
@@ -1546,13 +1611,10 @@ With a prefix argument, visit in other window."
 
 (defun monky-histedit (node)
   (interactive (list (monky-read-revision "Edit history starting from: ")))
-  (monky-run-hg-async "histedit" "--rev" node "--config" "ui.interface.histedit=text"))
-
-(defun monky-rebase (source dest)
-  (interactive (list
-                (monky-read-revision "Rebase source: ")
-                (monky-read-revision "Onto dest: ")))
-  (monky-run-hg-async "rebase" "-s" source "-d" dest "--tool" ":merge3"))
+  (monky-run-hg-async "histedit" "--rev" node
+                      "--config" "ui.interface.histedit=text"
+                      "--config" "histedit.linelen=200" ;; "--config" "histedit.summary-template={desc|firstline}"
+                      ))
 
 (defun monky-reset-tip ()
   (interactive)
@@ -1907,6 +1969,9 @@ before the last command."
 (defvar monky-hg-style-log-graph
   (monky-get-style-path "log-graph"))
 
+(defvar monky-hg-style-log-commit
+  (monky-get-style-path "log-commit"))
+
 (defvar monky-hg-style-files-status
   (monky-get-style-path "files-status"))
 
@@ -2138,8 +2203,6 @@ CALLBACK is called with the status and the associated filename."
     (insert "\n"))
   (setq monky-staged-all-files nil))
 
-;;; Shelves
-
 (defun monky-extensions ()
   "Return a list of all the enabled mercurial extensions."
   (let* ((config
@@ -2153,30 +2216,6 @@ CALLBACK is called with the status and the associated filename."
         (setq line (string-remove-suffix "=" line)))
       (push line extensions))
     (nreverse extensions)))
-
-(defun monky-insert-shelves ()
-  (when (member "shelve" (monky-extensions))
-    (monky-hg-section 'shelves "Shelves:" #'monky-wash-shelves
-                      "shelve" "--list")))
-
-(defun monky-wash-shelves ()
-  "Set shelf names on each line.
-This is naive and assumes that shelf names never contain (."
-  (while (re-search-forward
-          (rx bol (group (+? not-newline))
-              (+ space) "(")
-          nil
-          t)
-    (goto-char (line-beginning-position))
-    (monky-with-section 'shelf nil
-      (monky-set-section-info (match-string 1))
-      (put-text-property
-       (match-beginning 1)
-       (match-end 1)
-       'face
-       'monky-commit-id)
-      (goto-char (line-end-position)))))
-
 ;;; Parents
 
 (defvar-local monky-parents nil)
@@ -2242,6 +2281,68 @@ This is naive and assumes that shelf names never contain (."
     (unless empty
       (insert "\n"))))
 
+(defun monky-wash-histedit-state ()
+  (while (and (not (eobp))
+              (not (looking-at-p "[[:space:]]*$")))
+    (forward-line 1))
+  (while (not (eobp))
+    (monky-delete-line t)))
+
+;; (monky-wash-status-lines
+;;  (lambda (_status file)
+;;    (let ((monky-section-hidden-default monky-hide-diffs))
+;;      (when (not (member file monky-merged-files))
+;;        (monky-with-section file 'diff
+;;          (monky-insert-diff file)))))))
+
+(defun monky-file-contents (file &optional noerror)
+  (with-temp-buffer
+    (condition-case nil
+	    (progn
+	      (insert-file-contents file)
+	      (buffer-string))
+	  (file-error
+       (funcall (if noerror #'message #'user-error)
+                "Unable to read file %S"
+                file)
+	   nil))))
+
+(defun monky-insert-histedit-state ()
+  ;; Edit history between 6051e609a4a8 and f06bac4905c9
+  (when (monky-histedit-in-progress-p)
+    (let ((p (point)))
+      (pcase-let ((`(,filename ,len)
+                   (insert-file-contents (f-join (monky-get-root-dir) ".hg" "histedit-last-edit.txt"))))
+        (unless (re-search-forward "# Edit history between \\([0-9a-z]+\\) and \\([0-9a-z]+\\)")
+          (error "Malformed histedit-last-edit.txt"))
+        (let ((title (format "Histedit between %s and %s" (match-string 1) (match-string 2))))
+          (beginning-of-line)
+          (delete-region (point) (point-max))
+          (goto-char p)
+          (monky-with-section title 'histedit-state
+            (insert (propertize title 'face 'monky-section-title) "\n")
+            (goto-char (point-max))))))))
+
+  ;;         ))))))
+
+  ;;   (defun insert-histedit-state ()
+  ;;       (forward-char len)))
+  ;;   (let ((section (monky-insert-section
+  ;;                   'histedit-state
+  ;;                   "Histedit between XXX"
+  ;;                   #'monky-wash-histedit-state
+  ;;                   #'insert-histedit-state
+  ;;                   )))
+  ;;     ;; (setf (monky-section-title section) "Test")
+  ;;     section)))
+
+
+  ;; ;;  (append monky-hg-standard-options args)))
+  ;; ;; ;; ;; (let ((monky-hide-diffs t))
+  ;; ;; ;; ;;   (setq monky-merged-files '())
+  ;; ;; ;; (monky-hg-section 'merged "Merged Files:" #'monky-wash-merged-files
+  ;; ;; ;;                   "resolve" "--list")))
+
 (defun monky-insert-merged-files ()
   (let ((monky-hide-diffs t))
     (setq monky-merged-files '())
@@ -2264,12 +2365,61 @@ This is naive and assumes that shelf names never contain (."
                       "status" "--modified" "--added" "--removed")))
 ;;; Status mode
 
+(defun monky-wash-json-status ()
+  (let ((p (point))
+        (j (json-read)))
+    (delete-region p (point))
+
+    ;; (message "j %s" j)
+
+;; (defun monky-hg-section (section-title-and-type buffer-title washer &rest args)
+;;   (apply #'monky-insert-section
+;;          section-title-and-type
+;;          buffer-title
+;;          washer
+;;          monky-hg-executable
+;;          (append monky-hg-standard-options args)))
+
+    (monky-with-section "Changes:" 'changes2
+      (cl-loop for item across j
+               unless (alist-get 'unfinished item)
+               do
+               ;; (message "item %s" (type-of (alist-get 'status item)))
+               (insert
+                (format
+                 "%s   %s\n"
+                 (or (and (alist-get 'resolved item) "resolved  ")
+                     (and (alist-get 'unresolved item) "unresolved")
+                     (alist-get 'status item))
+                 (alist-get 'path item)))))
+
+    (monky-with-section "Unfinished:" 'unfinished
+      (cl-loop for item across j
+               when (alist-get 'unfinished item)
+               do
+               ;; (message "item %s" item)
+               (insert
+                (format
+                 "%s   %s\n"
+                 (alist-get 'unfinished item)
+                 (alist-get 'unfinishedmsg item)))))
+))
+
 (defun monky-refresh-status ()
   (setq monky-parents nil
         monky-merged-files nil)
   (monky-create-buffer-sections
     (monky-with-section 'status nil
       (monky-insert-parents)
+
+      (let ((monky-hg-process-environment (seq-remove (lambda (s) (s-starts-with-p "HGPLAIN=" s)) monky-hg-process-environment)))
+        (monky-hg-section 'changes2 "Changes:"
+                          #'monky-wash-json-status
+                          "--config" "commands.status.verbose=1"
+                          "status" "-Tjson"))
+
+      (when (monky-histedit-in-progress-p)
+        (monky-insert-histedit-state))
       (if (monky-merge-p)
           (progn
             (monky-insert-merged-files)
@@ -2278,7 +2428,7 @@ This is naive and assumes that shelf names never contain (."
         (monky-insert-missing-files)
         (monky-insert-changes)
         (monky-insert-staged-changes)
-        ;; (monky-insert-shelves)
+        (monky-insert-shelves)
         ))))
 
 (define-minor-mode monky-status-mode
@@ -2329,6 +2479,14 @@ PROPERTIES is the arguments for the function `propertize'."
                             (list (apply #'propertize l properties) " ")))
                         label-list))))
 
+;; (defun monky-set-window-margin (&optional window)
+;;   (when (or window (setq window (get-buffer-window)))
+;;     (with-selected-window window
+;;       (set-window-margins
+;;        nil (car (window-margins))
+;;        (and 24))))) ;; (magit-buffer-margin-p)
+;;        ;; (nth 2 magit-buffer-margin))))))
+
 (defun monky-present-log-line (width graph id branches tags bookmarks phase author date obsolete message)
   (let* ((hg-info (concat
                    (propertize (substring id 0 8) 'face 'monky-log-sha1)
@@ -2344,8 +2502,9 @@ PROPERTIES is the arguments for the function `propertize'."
          (total-space-left (max 0 (- width (length hg-info))))
          (author-date-space-taken (+ 16 (min 10 (length author))))
          (message-space-left (number-to-string (max 0 (- total-space-left author-date-space-taken 1))))
-         (msg-format (concat "%-" message-space-left "." message-space-left "s"))
-         (msg (format msg-format message)))
+         ;; (msg-format (concat "%-" message-space-left "." message-space-left "s"))
+         (msg (format "%s" ;; msg-format
+                      message)))
     (let* ((shortened-msg (if (< 3 (length msg))
                               (concat (substring msg 0 -3) "...")
                             msg))
@@ -2355,37 +2514,116 @@ PROPERTIES is the arguments for the function `propertize'."
       (concat
        hg-info
        (propertize msg 'face 'monky-log-message)
-       (propertize (format " %.10s" author) 'face 'monky-log-author)
-       (propertize (format " %.10s" date) 'face 'monky-log-date)))))
+))))
 
-(defun monky-log-current-branch ()
-  (interactive)
-  (monky-log "ancestors(.)"))
+;;;###autoload (autoload 'monky-log "monky" nil t)
+(define-transient-command monky-log ()
+  "Show revision history."
+  ;; :info-manual "(magit)Initiating a Commit"
+  ;; :man-page "git-commit"
+  ["Arguments"
+   ("=h" "Show hidden revisions"   "--hidden") ;; TODO: support this.
+   ;; ("-e" "Allow empty commit"                     "--allow-empty")
+   ;; ("-v" "Show diff of changes to be committed"   ("-v" "--verbose"))
+   ;; ("-n" "Disable hooks"                          ("-n" "--no-verify"))
+   ;; ("-R" "Claim authorship and reset author date" "--reset-author")
+   ;; (magit:--author :description "Override the author")
+   ;; (7 "-D" "Override the author date" "--date=" transient-read-date)
+   ;; ("-s" "Add Signed-off-by line"                 ("-s" "--signoff"))
+   ;; (5 magit:--gpg-sign)
+   ;; (magit-commit:--reuse-message)
+   ]
+  [["Actions"
+    ("l" "Current"          monky-log-current-branch)
+    ("a" "All"              monky-log-all)
+   ;;("o" "Other"            monky-log-other)
+    ("r" "Revset"           monky-log-revset)
+    ("c" "Containing"       monky-log-containing)
+    ("o" "Obsolete"         monky-log-obsolete)
+   ]]
+  ;; ["Edit"
+  ;;  ("f" "Fixup"          magit-commit-fixup)
+  ;;  ("s" "Squash"         magit-commit-squash)
+  ;;  ("A" "Augment"        magit-commit-augment)
+  ;;  (6 "x" "Absorb changes" magit-commit-absorb)]
+  ;; [""
+  ;;  ("F" "Instant fixup"  magit-commit-instant-fixup)
+  ;;  ("S" "Instant squash" magit-commit-instant-squash)]
+  ;; ]
+;; (when (not (or monky-staged-files (monky-merge-p)))
+;;   (if (y-or-n-p "Nothing staged. Stage and commit all changes? ")
+;;       (monky-stage-all)
+;;     (user-error "Nothing staged")))
+)
 
-(defun monky-log-buffer-file ()
+(defun monky-log-arguments ()
+  (transient-args 'monky-log))
+
+(defun monky-log-current-branch (args)
+  (interactive (list
+                (monky-log-arguments)))
+  (monky-log-setup-buffer (append args (list "--rev" "ancestors(.)"))))
+
+(defun monky-log-buffer-file (args)
   "View a log of commits that affected the current file."
-  (interactive)
-  (monky-log "ancestors(.)" (buffer-file-name)))
+  (interactive (list
+                (monky-log-arguments)))
+  (monky-log-setup-buffer (append args (list "--rev" "ancestors(.)" "--" (buffer-file-name)))))
 
-(defun monky-log-all ()
-  (interactive)
-  (monky-log nil))
+(defun monky-log-all (args)
+  (interactive (list
+                (monky-log-arguments)))
+  (monky-log-setup-buffer (append args (list))))
 
-(defun monky-log-revset (revset)
-  (interactive  "sRevset: ")
-  (monky-log revset))
+(defun monky-log-containing (args rev)
+  (interactive (list
+                (monky-log-arguments)
+                (monky-section-case "log"
+                  ((branch)
+                   (monky-section-info (monky-current-section)))
+                  ((log commits commit)
+                   (monky-section-info (monky-current-section))))))
+  (monky-log-setup-buffer (append args (list "--rev" (format "!public() & (::%s | %s::)" rev rev)))))
 
-(defun monky-log (revs &optional path)
+(defun monky-log-obsolete (args rev)
+  (interactive (list
+                (monky-log-arguments)
+                (monky-section-case "log"
+                  ((branch)
+                   (monky-section-info (monky-current-section)))
+                  ((log commits commit)
+                   (monky-section-info (monky-current-section))))))
+  (monky-log-setup-buffer (append args (list "--rev" rev)) 'olog))
+
+(defvar monky-log-revset-history '())
+
+(defun monky-log-revset (revset args)
+  (interactive (list
+                (read-string "Revset: " nil 'monky-log-revset-history)
+                (monky-log-arguments)))
+  (monky-log-setup-buffer (append args (list "--rev" revset))))
+
+(defun monky-log-setup-buffer (args &optional cmd)
   (monky-with-process
-    (let ((topdir (monky-get-root-dir)))
+    (let ((topdir (monky-get-root-dir))
+          (refresh-func (pcase cmd
+                          ('olog #'monky-refresh-olog-buffer)
+                          (_ #'monky-refresh-log-buffer))))
       (pop-to-buffer monky-log-buffer-name)
       (setq default-directory topdir
             monky-root-dir topdir)
-      (monky-mode-init topdir 'log (monky-refresh-log-buffer revs path))
-      (monky-log-mode t))))
+      (monky-mode-init topdir 'log (funcall refresh-func args))
+      (monky-log-mode t)
+      (monky-set-buffer-margin)
+      ;; (dolist (window (get-buffer-window-list nil nil 0))
+      ;;   (with-selected-window window
+      ;;     (monky-set-window-margin)
+      ;;     (add-hook 'window-configuration-change-hook
+      ;;               'monky-set-window-margin nil t)))
+      )))
 
 (defvar monky-log-graph-node-re
-  "^\\([\\/@ox\\*+-|\s]+\s*\\)")
+  "^\\([\\/@ox%\\*+-|\s]+\s*\\)")
 
 (defvar monky-log-graph-re
   (concat
@@ -2427,9 +2665,9 @@ Example:
   (save-match-data
     (cond
      ((string-match
-       ;; If S contains a space, take the first word.
-       (rx (group (1+ (not space)))
-           space)
+       ;; If S contains a name followed by an email addres, take just the name.
+       (rx (group (1+ (not (any "<"))))
+           " <")
        s)
       (match-string 1 s))
      ((string-match
@@ -2439,6 +2677,28 @@ Example:
        s)
       (match-string 1 s))
      (t s))))
+
+(defcustom monky-ellipsis ?…
+  "Character used to abbreviate text.
+
+Currently this is used to abbreviate author names in the margin
+and in process buffers to elide `monky-hg-global-arguments'."
+  :package-version '(monky . "0.3.0")
+  :group 'monky-miscellaneous
+  :type 'character)
+
+(defun monky-log-format-author-margin (author date)
+  (monky-make-margin-overlay
+   (concat (propertize
+            (truncate-string-to-width
+             (or author "")
+             monky-buffer-margin-author-width
+             nil ?\s (make-string 1 monky-ellipsis))
+            'face 'monky-log-author)
+           " "
+           (propertize
+            date
+            'face 'monky-log-date))))
 
 (defun monky-wash-log-line ()
   (if (looking-at monky-log-graph-re)
@@ -2466,6 +2726,7 @@ Example:
                    (monky-decode-xml-entities date)
                    (monky-decode-xml-entities obsolete)
                    (monky-decode-xml-entities msg)))
+          (monky-log-format-author-margin author date)
           (monky-set-section-info id)
           (when monky-log-count (cl-incf monky-log-count))
           (forward-line)
@@ -2511,24 +2772,40 @@ With a non numeric prefix ARG, show all entries"
    (t (setq monky-log-cutoff-length (* monky-log-cutoff-length 2))))
   (monky-refresh))
 
-(defun monky-refresh-log-buffer (revs path)
+(defun monky-refresh-log-buffer (args)
   (lambda ()
     (monky-create-log-buffer-sections
-      (monky-hg-section
+      (apply #'monky-hg-section
        'commits
-       (if path
-	   (format "Commits affecting %s:"
-		   (file-relative-name path monky-root-dir))
-	 "Commits:")
+       (if-let ((path (and (-contains-p args "--") (car (last path)))))
+           (format "Commits affecting %s:"
+                   (file-relative-name path monky-root-dir))
+         "Commits:")
        #'monky-wash-logs
        "log"
        "--config" "extensions.graphlog="
        "-G"
        "--limit" (number-to-string monky-log-cutoff-length)
        "--style" monky-hg-style-log-graph
-       (if revs "--rev" "")
-       (if revs revs "")
-       (if path path "")))))
+       args))))
+
+       ;; (if revs "--rev" "")
+       ;; (if revs revs "")
+       ;; (if path path "")))))
+
+(defun monky-refresh-olog-buffer (args)
+  (lambda ()
+    (monky-create-log-buffer-sections
+      (apply #'monky-hg-section
+       'commits
+       (if-let ((path (and (-contains-p args "--") (car (last path)))))
+           (format "Commits affecting %s:"
+                   (file-relative-name path monky-root-dir))
+         "Commits:")
+       #'monky-wash-logs
+       "olog"
+       "-G"
+       args))))
 
 (defun monky-next-sha1 (pos)
   "Return position of next sha1 after given position POS"
@@ -2659,33 +2936,14 @@ With a non numeric prefix ARG, show all entries"
       (if select
           (pop-to-buffer buffer)))))
 
-(defun monky-show-shelf (name)
-  (let ((buffer (get-buffer-create "*monky-shelf*"))
-        (inhibit-read-only t))
-    (pop-to-buffer buffer)
-
-    (erase-buffer)
-    (monky-hg-section
-     nil nil
-     #'ignore
-     "shelve" "-l" "-p" name)
-    (goto-char (point-min))
-    (when (re-search-forward "^diff " nil t)
-      (goto-char (line-beginning-position))
-      (monky-wash-diffs))
-    (monky-mode)))
-
-(defun monky-delete-shelf (name)
-  (unless (zerop (monky-hg-exit-code "shelve" "--delete" name))
-    (user-error "Could not drop shelved %s" name))
-  (monky-refresh-buffer))
-
 (defun monky-refresh-commit-buffer (commit)
   (monky-create-buffer-sections
     (monky-hg-section nil nil
                       #'monky-wash-commit
-                      "-v"
+                      "--debug"
+                      ;; "--verbose"
                       "log"
+                      "--style" monky-hg-style-log-commit
                       "--stat"
                       "--patch"
                       "--rev" commit)))
@@ -2786,26 +3044,294 @@ With a non numeric prefix ARG, show all entries"
     ((log commits commit)
      (monky-histedit (monky-section-info (monky-current-section))))))
 
-(defun monky-rebase-item (dest)
-  "Rebase the revision represented by current item."
-  (interactive
-   (list
-    (monky-read-revision (format "Rebase source %s onto dest : "
-                         (monky-section-case "rebase"
-                           ((branch)
-                            (monky-section-info (monky-current-section)))
-                           ((log commits commit)
-                            (monky-section-info (monky-current-section))))))))
-  (monky-section-action "rebase"
-    ((branch)
-     (monky-rebase (monky-section-info (monky-current-section)) dest))
-    ((log commits commit)
-     (monky-rebase (monky-section-info (monky-current-section)) dest))))
+(defun monky-histedit-in-progress-p ()
+  "Return t if a histedit is in progress."
+  (file-exists-p (f-join (monky-get-root-dir) ".hg" "histedit-state")))
+
+(defun monky-rebase-in-progress-p ()
+  "Return t if a rebase is in progress."
+  (file-exists-p (f-join (monky-get-root-dir) ".hg" "rebasestate")))
+
+;; (defun monky-hg-rebase (source dest)
+;;   (interactive (list
+;;                 (monky-read-revision "Rebase source: ")
+;;                 (monky-read-revision "Onto dest: ")))
+;;   (monky-run-hg-async "rebase" "-s" source "-d" dest "--tool" ":merge3"))
+
+;; (defun monky-rebase-item (dest)
+;;   "Rebase the revision represented by current item."
+;;   (interactive
+;;    (list
+;;     (monky-read-revision (format "Rebase source %s onto dest : "
+;;                          (monky-section-case "rebase"
+;;                            ((branch)
+;;                             (monky-section-info (monky-current-section)))
+;;                            ((log commits commit)
+;;                             (monky-section-info (monky-current-section))))))))
+;;   (monky-section-action "rebase"
+;;     ((branch)
+;;      (monky-hg-rebase (monky-section-info (monky-current-section)) dest))
+;;     ((log commits commit)
+;;      (monky-hg-rebase (monky-section-info (monky-current-section)) dest))))
+
+;; If we have a region, we should use -r r1 -r r2 ...
+;; If not, we should default to -s but allow -b.  These are exclusive.
+
+;; (define-infix-argument sf:--path ()
+;;   :description "Path"
+;;   :class 'transient-option
+;;   :key "-p"
+;;   :history-key 'sf-path
+;;   ;; :format "%v)"
+;;   :argument "path=")
+;;   ;; :reader 'magit-transient-read-person)
+
+(defun monky-region-range ()
+  (interactive)
+  (if-let
+      ((      (region-active-p))
+       (newer (monky-section-info (monky-section-at (monky-next-sha1 (region-beginning)))))
+       (older (monky-section-info (monky-section-at (monky-previous-sha1 (- (region-end) 1)))))
+       (      (not (string= newer older))))
+      (list older newer)
+    (list (monky-section-info (monky-current-section)))))
+
+(defun monky-region-active-p ()
+  "Whether there is an active region spanning more than one commit."
+  (when-let ((range (monky-region-range)))
+    (> (length range) 1)))
+
+;;;###autoload (autoload 'sft "searchfox" nil t)
+(define-transient-command monky-rebase ()
+  "Move changeset (and descendants) to a different branch."
+  ;; :man-page "git-push"
+  ["Arguments"
+   :if-not monky-rebase-in-progress-p
+   ("-k" "keep original changesets" ("-k" "--keep"))
+   ]
+  ;; [
+  ;;  :if monky-region-active-p
+  ;;  ("-r" "rebase these revisions" ("-r" "--rev"))
+  ;;  ;; (sf:--path)
+  ;;  ]
+  ;; [
+  ;;  :if-not monky-region-active-p
+  ;;  ("-s" "rebase the specified changesets and their descendants" ("-s" "--source"))
+  ;;  ("-b" "rebase everything from branching point of specified changeset" ("-b" "--base"))
+  ;;  ;; (sf:--path)
+  ;;  ]
+
+  ["Rebase"
+   :if-not monky-rebase-in-progress-p
+   [("i" "interactively (histedit)" monky-histedit-item)
+    ("s" "rebase specified source changeset and its descendants onto dest" monky-rebase-source-onto-dest)
+    ("b" "rebase everything from branching point of specified changeset onto dest" monky-rebase-base-onto-dest)
+    ("r" "rebase revision(s) onto dest" monky-rebase-rev-onto-dest)]
+    ;; ("b" "rebase everything from branching point of specified changeset onto dest" monky-rebase-base-onto-dest)]
+
+   ;; [("m" "to modify a commit" monky-rebase-edit-commit)
+   ;;  ("w" "to reword a commit" monky-rebase-reword-commit)
+   ;;  ("k" "to remove a commit" monky-rebase-remove-commit)
+   ;;  ("f" "to autosquash"      monky-rebase-autosquash)]
+   ]
+
+  ["Actions"
+   :if monky-rebase-in-progress-p
+   ("r" "Continue" monky-rebase-continue)
+   ("s" "Stop"     monky-rebase-stop)
+   ;; ("e" "Edit"     magit-rebase-edit)
+   ("a" "Abort"    monky-rebase-abort)])
+
+
+;;;###autoload
+(defun monky-rebase-continue (&optional noedit)
+  "Restart the current rebasing operation.
+In some cases this pops up a commit message buffer for you do
+edit.  With a prefix argument the old message is reused as-is."
+  (interactive "P")
+  (unless (monky-rebase-in-progress-p)
+    (user-error "No rebase in progress"))
+  (when (y-or-n-p "Continue this rebase ")
+    (monky-run-hg "rebase" "--continue")))
+
+  ;; (if (monky-rebase-in-progress-p)
+  ;;     ;; (if (magit-anything-unstaged-p t)
+  ;;     ;;     (user-error "Cannot continue rebase with unstaged changes")
+  ;;     ;;   (when (and (magit-anything-staged-p)
+  ;;     ;;              (file-exists-p (magit-git-dir "rebase-merge"))
+  ;;     ;;              (not (member (magit-toplevel)
+  ;;     ;;                           magit--rebase-public-edit-confirmed)))
+  ;;     ;;     (magit-commit-amend-assert))
+  ;;     ;;   (if noedit
+  ;;     ;;       (let ((process-environment process-environment))
+  ;;     ;;         (push "GIT_EDITOR=true" process-environment)
+  ;;     ;;         (magit-run-git-async (magit--rebase-resume-command) "--continue")
+  ;;     ;;         (set-process-sentinel magit-this-process
+  ;;     ;;                               #'magit-sequencer-process-sentinel)
+  ;;     ;;         magit-this-process)
+  ;;     ;;     (magit-run-git-sequencer (magit--rebase-resume-command) "--continue")))
+  ;;   (user-error "No rebase in progress")))
+
+;;;###autoload
+(defun monky-rebase-stop ()
+  "Stop the current rebase operation, leaving the work in progress."
+  (interactive)
+  (unless (monky-rebase-in-progress-p)
+    (user-error "No rebase in progress"))
+  (when (y-or-n-p "Stop this rebase ")
+    (monky-run-hg "rebase" "--stop")))
+
+;;;###autoload
+(defun monky-rebase-abort ()
+  "Abort the current rebase operation, restoring the original branch."
+  (interactive)
+  (unless (monky-rebase-in-progress-p)
+    (user-error "No rebase in progress"))
+  (when (y-or-n-p "Abort this rebase ")
+    (monky-run-hg "rebase" "--abort")))
+
+
+(defun monky-current-line-string ()
+  (let ((s (buffer-substring-no-properties (line-beginning-position) (line-end-position))))
+    (forward-line 1)
+    s))
+
+(defun monky-read-histedit-state ()
+  (interactive)
+  (save-excursion
+    (goto-char (point-min))
+    (unless (looking-at "v1")
+      (user-error "Not a v1 histedit-state file"))
+    (forward-line 4)
+    ;; v1
+    ;; parentctxnode
+    ;; topmost
+    ;; keep
+
+    ;; rules
+    (let*
+        ((rule-count (string-to-number (monky-current-line-string)))
+         (rules (cl-loop repeat rule-count
+                         collect
+                         (list (monky-current-line-string)
+                               (monky-current-line-string))))
+         (subs-count (string-to-number (monky-current-line-string)))
+         (subs (cl-loop repeat subs-count
+                        collect
+                        (let ((line (monky-current-line-string)))
+                          (list (substring line 0 40)
+                                (substring line 41 80))))))
+      (list rules subs))))
+  
+
+(defun monky-rebase-arguments ()
+  (transient-args 'monky-rebase))
+
+(defun monky-read-rebase-dest-revision (type)
+  (interactive)
+  (monky-read-revision (concat "Rebase "
+                               type
+                               " "
+                               (monky-section-case "rebase"
+                                 ((branch)
+                                  (monky-section-info (monky-current-section)))
+                                 ((log commits commit)
+                                  (monky-section-info (monky-current-section))))
+                               " onto dest: ")))
+
+(defun monky-hg-rebase (args)
+  ;; (interactive (list
+  ;;               (monky-read-revision "Rebase source: ")
+  ;;               (monky-read-revision "Onto dest: ")))
+  (apply #'monky-run-hg-async "rebase" "--tool" ":merge3" args))
+
+(defun monky-rebase-source-onto-dest (dest args)
+  (interactive (list
+                (monky-read-rebase-dest-revision "source")
+                (monky-rebase-arguments)))
+  (let ((rev (monky-section-case "rebase"
+                  ((branch)
+                   (monky-section-info (monky-current-section)))
+                  ((log commits commit)
+                   (monky-section-info (monky-current-section))))))
+    ;; (message "Rebasing... %S" args)
+
+    ;; (when-let ((arg (--remove-first (member it (list "--base" "--rev")) args)))
+    ;;   (setq args (concat args (list arg (car (monky-region-range))))))
+    
+    ;; (message "rev-onto-dest %S" args)
+    (monky-hg-rebase (append args (list "--source" rev "--dest" dest)))
+    ;; (message "Rebasing... done")
+    ))
+
+(defun monky-rebase-base-onto-dest (dest args)
+  (interactive (list
+                (monky-read-rebase-dest-revision "base")
+                (monky-rebase-arguments)))
+  (let ((rev (monky-section-case "rebase"
+                  ((branch)
+                   (monky-section-info (monky-current-section)))
+                  ((log commits commit)
+                   (monky-section-info (monky-current-section))))))
+    ;; (message "Rebasing... %S" args)
+
+    ;; (when-let ((arg (--remove-first (member it (list "--base" "--source")) args)))
+    ;;   (setq args (concat args (list arg (car (monky-region-range))))))
+    
+    ;; (message "source-onto-dest %S" args)
+    (monky-hg-rebase (append args (list "--base" rev "--dest" dest)))
+    ;; (message "Rebasing... done")
+    ))
+
+(defun monky-rebase-rev-onto-dest (dest args)
+  (interactive (list
+                (monky-read-rebase-dest-revision "rev")
+                (monky-rebase-arguments)))
+  (let ((rev (monky-section-case "rebase"
+                  ((branch)
+                   (monky-section-info (monky-current-section)))
+                  ((log commits commit)
+                   (monky-section-info (monky-current-section))))))
+    ;; (message "Rebasing... %S" args)
+
+    ;; (when-let ((arg (--remove-first (member it (list "--base" "--source")) args)))
+    ;;   (setq args (concat args (list arg (car (monky-region-range))))))
+    
+    ;; (message "source-onto-dest %S" args)
+    (monky-hg-rebase (append args (list "--rev" rev "--dest" dest)))
+    ;; (message "Rebasing... done")
+    ))
+
+;; ;;;###autoload
+;; (defun sft-search-literal (&rest args)
+;;   "Push the current branch to a branch read in the minibuffer."
+;;   (interactive
+;;    ;; (--if-let (magit-get-current-branch)
+;;    ;;     (list (magit-read-remote-branch (format "Push %s to" it)
+;;    ;;                                     nil nil it 'confirm)
+;;    (sft-arguments))
+;;      ;; (user-error "No branch is checked out")))
+;;   (message "sft-search-literal %s" args)
+;;   ;; (magit-git-push (magit-get-current-branch) target args)
+;; )
+
+;; ;;;###autoload
+;; (defun sft-search-regexp (&rest args)
+;;   "Push the current branch to a branch read in the minibuffer."
+;;   (interactive
+;;    ;; (--if-let (magit-get-current-branch)
+;;    ;;     (list (magit-read-remote-branch (format "Push %s to" it)
+;;    ;;                                     nil nil it 'confirm)
+;;    (sft-arguments))
+;;      ;; (user-error "No branch is checked out")))
+;;   (message "sft-search-regexp %s" args)
+;;   ;; (magit-git-push (magit-get-current-branch) target args)
+;; )
 
 (defun monky-prune (node-1 &optional node-2)
-  "Prune revision NODE-1 or topological revision range NODE-1::NODE-2."
+  "Prune revision NODE-1 or topological revision range NODE-2::NODE-1."
   (monky-run-hg "prune" "--rev"
-                (if node-2 (concat node-1 "::" node-2) node-1)))
+                (if node-2 (concat node-2 "::" node-1) node-1)))
 
 (defun monky-prune-item ()
   "Prune the revision(s) represented by the current item or region."
@@ -2822,7 +3348,7 @@ With a non numeric prefix ARG, show all entries"
   "`moz-phab submit` revision NODE-1 or topological revision range NODE-1::NODE-2."
   (let ((default-directory (monky-get-root-dir))
         (nodes (if (and node-2 (not (string= node-1 node-2)))
-                   (list node-1 node-2)
+                   (list node-2 node-1)
                  (list "--single" node-1))))
     (monky-with-refresh
       ;; TODO: use a compilation buffer?  Use the *monky-process* buffer?
@@ -2839,424 +3365,6 @@ With a non numeric prefix ARG, show all entries"
 	        (monky-section-info (monky-section-at (monky-next-sha1 (region-beginning))))
 	        (monky-section-info (monky-section-at (monky-previous-sha1 (- (region-end) 1)))))
        (monky-mozilla-review (monky-section-info (monky-current-section)))))))
-
-;;; Queue mode
-(define-minor-mode monky-queue-mode
-  "Minor mode for hg Queue.
-
-\\{monky-queue-mode-map}"
-  :group monky
-  :init-value ()
-  :lighter ()
-  :keymap monky-queue-mode-map)
-
-(defvar monky-queue-buffer-name "*monky-queue*")
-
-(defvar-local monky-patches-dir ".hg/patches/")
-
-(defun monky-patch-series-file ()
-  (concat monky-patches-dir "series"))
-
-(defun monky-insert-patch (patch inserter &rest args)
-  (let ((p (point))
-        (monky-hide-diffs nil))
-    (save-restriction
-      (narrow-to-region p p)
-      (apply inserter args)
-      (goto-char (point-max))
-      (if (not (eq (char-before) ?\n))
-          (insert "\n"))
-      (goto-char p)
-      (while (and (not (eobp)) (not (looking-at "^diff")))
-        (monky-delete-line t))
-      (when (looking-at "^diff")
-        (monky-wash-diffs))
-      (goto-char (point-max)))))
-
-(defun monky-insert-guards (patch)
-  (let ((guards (cl-remove-if
-                 (lambda (guard) (string= "unguarded" guard))
-                 (split-string
-                  (cadr (split-string
-                         (monky-hg-string "qguard" patch
-                                          "--config" "extensions.mq=")
-                         ":"))))))
-    (dolist (guard guards)
-      (insert (propertize " " 'face 'monky-queue-patch)
-              (propertize guard
-                          'face
-                          (if (monky-string-starts-with-p guard "+")
-                              'monky-queue-positive-guard
-                            'monky-queue-negative-guard))))
-    (insert (propertize "\n" 'face 'monky-queue-patch))))
-
-(defun monky-wash-queue-patch ()
-  (monky-wash-queue-insert-patch #'insert-file-contents))
-
-(defvar monky-queue-staged-all-files nil)
-(defvar-local monky-queue-staged-files nil)
-(defvar-local monky-queue-old-staged-files nil)
-
-(defun monky-wash-queue-discarding ()
-  (monky-wash-status-lines
-   (lambda (status file)
-     (let ((monky-section-hidden-default monky-hide-diffs))
-       (if (or monky-queue-staged-all-files
-               (member file monky-old-staged-files)
-               (member file monky-queue-old-staged-files))
-           (monky-queue-stage-file file)
-         (monky-with-section file 'diff
-           (monky-insert-diff file status "qdiff"))))))
-  (setq monky-queue-staged-all-files nil))
-
-(defun monky-wash-queue-insert-patch (inserter)
-  (if (looking-at "^\\([^\n]+\\)$")
-      (let ((patch (match-string 1)))
-        (monky-delete-line)
-        (let ((monky-section-hidden-default t))
-          (monky-with-section patch 'patch
-            (monky-set-section-info patch)
-            (insert
-             (propertize (format "\t%s" patch) 'face 'monky-queue-patch))
-            (monky-insert-guards patch)
-            (funcall #'monky-insert-patch
-                     patch inserter (concat monky-patches-dir patch))
-            (forward-line)))
-        t)
-    nil))
-
-(defun monky-wash-queue-queue ()
-  (if (looking-at "^\\([^()\n]+\\)\\(\\s-+([^)]*)\\)?$")
-      (let ((queue (match-string 1)))
-        (monky-delete-line)
-        (when (match-beginning 2)
-          (setq monky-patches-dir
-                (if (string= queue "patches")
-                    ".hg/patches/"
-                  (concat ".hg/patches-" queue "/")))
-          (put-text-property 0 (length queue) 'face 'monky-queue-active queue))
-        (monky-with-section queue 'queue
-          (monky-set-section-info queue)
-          (insert "\t" queue)
-          (forward-line))
-        t)
-    nil))
-
-(defun monky-wash-queue-queues ()
-    (if (looking-at "^patches (.*)\n?\\'")
-        (progn
-          (monky-delete-line t)
-          nil)
-      (monky-wash-sequence #'monky-wash-queue-queue)))
-
-(defun monky-wash-queue-patches ()
-  (monky-wash-sequence #'monky-wash-queue-patch))
-
-;;; Queues
-(defun monky-insert-queue-queues ()
-  (monky-hg-section 'queues "Patch Queues:"
-                    #'monky-wash-queue-queues
-                    "qqueue" "--list" "extensions.mq="))
-
-;;; Applied Patches
-(defun monky-insert-queue-applied ()
-  (monky-hg-section 'applied "Applied Patches:" #'monky-wash-queue-patches
-                    "qapplied" "--config" "extensions.mq="))
-
-;;; UnApplied Patches
-(defun monky-insert-queue-unapplied ()
-  (monky-hg-section 'unapplied "UnApplied Patches:" #'monky-wash-queue-patches
-                    "qunapplied" "--config" "extensions.mq="))
-
-;;; Series
-(defun monky-insert-queue-series ()
-  (monky-hg-section 'qseries "Series:" #'monky-wash-queue-patches
-                    "qseries" "--config" "extensions.mq="))
-
-;;; Qdiff
-(defun monky-insert-queue-discarding ()
-  (when (monky-qtip-p)
-    (setq monky-queue-old-staged-files (cl-copy-list monky-queue-staged-files))
-    (setq monky-queue-staged-files '())
-    (let ((monky-hide-diffs t))
-      (monky-hg-section 'discarding "Discarding (qdiff):"
-                        #'monky-wash-queue-discarding
-                        "log" "--style" monky-hg-style-files-status
-                        "--rev" "qtip"))))
-
-(defun monky-insert-queue-staged-changes ()
-  (when (and (monky-qtip-p)
-             (or monky-queue-staged-files monky-staged-files))
-    (monky-with-section 'queue-staged nil
-      (insert (propertize "Staged changes (qdiff):"
-                          'face 'monky-section-title) "\n")
-      (let ((monky-section-hidden-default t))
-        (dolist (file (delete-dups (cl-copy-list (append monky-queue-staged-files
-                                                         monky-staged-files))))
-          (monky-with-section file 'diff
-            (monky-insert-diff file nil "qdiff")))))
-    (insert "\n")))
-
-(defun monky-wash-active-guards ()
-  (if (looking-at "^no active guards")
-      (monky-delete-line t)
-    (monky-wash-sequence
-     (lambda ()
-       (let ((guard (buffer-substring (point) (point-at-eol))))
-         (monky-delete-line)
-         (insert " " (propertize guard 'face 'monky-queue-positive-guard))
-         (forward-line))))))
-
-
-;;; Active guards
-(defun monky-insert-active-guards ()
-  (monky-hg-section 'active-guards "Active Guards:" #'monky-wash-active-guards
-                    "qselect" "--config" "extensions.mq="))
-
-;;; Queue Staged Changes
-
-(defun monky-queue-stage-file (file)
-  (push file monky-queue-staged-files))
-
-(defun monky-queue-unstage-file (file)
-  (setq monky-queue-staged-files (delete file monky-queue-staged-files)))
-
-(defun monky-refresh-queue-buffer ()
-  (monky-create-buffer-sections
-    (monky-with-section 'queue nil
-      (monky-insert-untracked-files)
-      (monky-insert-missing-files)
-      (monky-insert-changes)
-      (monky-insert-staged-changes)
-      (monky-insert-queue-discarding)
-      (monky-insert-queue-staged-changes)
-      (monky-insert-queue-queues)
-      (monky-insert-active-guards)
-      (monky-insert-queue-applied)
-      (monky-insert-queue-unapplied)
-      (monky-insert-queue-series))))
-
-(defun monky-queue ()
-  (interactive)
-  (monky-with-process
-    (let ((topdir (monky-get-root-dir)))
-      (pop-to-buffer monky-queue-buffer-name)
-      (monky-mode-init topdir 'queue #'monky-refresh-queue-buffer)
-      (monky-queue-mode t))))
-
-(defun monky-qqueue (queue)
-  (monky-run-hg "qqueue"
-                "--config" "extensions.mq="
-                queue))
-
-(defun monky-qpop (&optional patch)
-  (interactive)
-  (apply #'monky-run-hg
-         "qpop"
-         "--config" "extensions.mq="
-         (if patch (list patch) '())))
-
-(defun monky-qpush (&optional patch)
-  (interactive)
-  (apply #'monky-run-hg
-         "qpush"
-         "--config" "extensions.mq="
-         (if patch (list patch) '())))
-
-(defun monky-qpush-all ()
-  (interactive)
-  (monky-run-hg "qpush" "--all"
-                "--config" "extensions.mq="))
-
-(defun monky-qpop-all ()
-  (interactive)
-  (monky-run-hg "qpop" "--all"
-                "--config" "extensions.mq="))
-
-(defvar monky-log-edit-buffer-name "*monky-edit-log*"
-  "Buffer name for composing commit messages.")
-
-(defun monky-qrefresh ()
-  (interactive)
-  (if (not current-prefix-arg)
-      (apply #'monky-run-hg "qrefresh"
-             "--config" "extensions.mq="
-             (append monky-staged-files monky-queue-staged-files))
-    ;; get last commit message
-    (with-current-buffer (get-buffer-create monky-log-edit-buffer-name)
-      (monky-hg-insert
-       (list "log" "--config" "extensions.mq="
-             "--template" "{desc}" "-r" "-1")))
-    (monky-pop-to-log-edit 'qrefresh)))
-
-(defun monky-qremove (patch)
-  (monky-run-hg "qremove" patch
-                "--config" "extensions.mq="))
-
-(defun monky-qnew (patch)
-  (interactive (list (read-string "Patch Name : ")))
-  (if (not current-prefix-arg)
-      (monky-run-hg "qnew" patch
-                    "--config" "extensions.mq=")
-    (monky-pop-to-log-edit 'qnew patch)))
-
-(defun monky-qinit ()
-  (interactive)
-  (monky-run-hg "qinit"
-                "--config" "extensions.mq="))
-
-(defun monky-qimport (node-1 &optional node-2)
-  (monky-run-hg "qimport" "--rev"
-                (if node-2 (concat node-1 ":" node-2) node-1)
-                "--config" "extensions.mq="))
-
-(defun monky-qrename (old-patch &optional new-patch)
-  (let ((new-patch (or new-patch
-                       (read-string "New Patch Name : "))))
-    (monky-run-hg "qrename" old-patch new-patch
-                  "--config" "extensions.mq=")))
-
-(defun monky-qfold (patch)
-  (monky-run-hg "qfold" patch
-                "--config" "extensions.mq="))
-
-(defun monky-qguard (patch)
-  (let ((guards (monky-parse-args (read-string "Guards : "))))
-    (apply #'monky-run-hg "qguard" patch
-           "--config" "extensions.mq="
-           "--" guards)))
-
-(defun monky-qselect ()
-  (interactive)
-  (let ((guards (monky-parse-args (read-string "Guards : "))))
-    (apply #'monky-run-hg "qselect"
-           "--config" "extensions.mq="
-           guards)))
-
-(defun monky-qfinish (patch)
-  (monky-run-hg "qfinish" patch
-                "--config" "extensions.mq="))
-
-(defun monky-qfinish-applied ()
-  (interactive)
-  (monky-run-hg "qfinish" "--applied"
-                "--config" "extensions.mq="))
-
-(defun monky-qreorder ()
-  "Pop all patches and edit .hg/patches/series file to reorder them"
-  (interactive)
-  (let ((series (monky-patch-series-file)))
-   (monky-qpop-all)
-   (with-current-buffer (get-buffer-create monky-log-edit-buffer-name)
-     (erase-buffer)
-     (insert-file-contents series))
-   (monky-pop-to-log-edit 'qreorder)))
-
-(defun monky-queue-stage-all ()
-  "Add all items in Changes to the staging area."
-  (interactive)
-  (monky-with-refresh
-    (setq monky-queue-staged-all-files t)
-    (monky-refresh-buffer)))
-
-(defun monky-queue-unstage-all ()
-  "Remove all items from the staging area"
-  (interactive)
-  (monky-with-refresh
-    (setq monky-queue-staged-files '())
-    (monky-refresh-buffer)))
-
-(defun monky-qimport-item ()
-  (interactive)
-  (monky-section-action "qimport"
-    ((log commits commit)
-     (if (region-active-p)
-	 (monky-qimport
-	  (monky-section-info (monky-section-at (monky-next-sha1 (region-beginning))))
-	  (monky-section-info (monky-section-at
-			       (monky-previous-sha1 (- (region-end) 1)))))
-       (monky-qimport (monky-section-info (monky-current-section)))))))
-
-(defun monky-qpop-item ()
-  (interactive)
-  (monky-section-action "qpop"
-    ((applied patch)
-     (monky-qpop (monky-section-info (monky-current-section)))
-     (monky-qpop))
-    ((applied)
-     (monky-qpop-all))
-    ((staged diff)
-     (monky-unstage-file (monky-section-title (monky-current-section)))
-     (monky-queue-unstage-file (monky-section-title (monky-current-section)))
-     (monky-refresh-buffer))
-    ((staged)
-     (monky-unstage-all)
-     (monky-queue-unstage-all))
-    ((queue-staged diff)
-     (monky-unstage-file (monky-section-title (monky-current-section)))
-     (monky-queue-unstage-file (monky-section-title (monky-current-section)))
-     (monky-refresh-buffer))
-    ((queue-staged)
-     (monky-unstage-all)
-     (monky-queue-unstage-all))))
-
-(defun monky-qpush-item ()
-  (interactive)
-  (monky-section-action "qpush"
-    ((unapplied patch)
-     (monky-qpush (monky-section-info (monky-current-section))))
-    ((unapplied)
-     (monky-qpush-all))
-    ((untracked file)
-     (monky-run-hg "add" (monky-section-info (monky-current-section))))
-    ((untracked)
-     (monky-run-hg "add"))
-    ((missing file)
-     (monky-run-hg "remove" "--after" (monky-section-info (monky-current-section))))
-    ((changes diff)
-     (monky-stage-file (monky-section-title (monky-current-section)))
-     (monky-queue-stage-file (monky-section-title (monky-current-section)))
-     (monky-refresh-buffer))
-    ((changes)
-     (monky-stage-all)
-     (monky-queue-stage-all))
-    ((discarding diff)
-     (monky-stage-file (monky-section-title (monky-current-section)))
-     (monky-queue-stage-file (monky-section-title (monky-current-section)))
-     (monky-refresh-buffer))
-    ((discarding)
-     (monky-stage-all)
-     (monky-queue-stage-all))))
-
-(defun monky-qremove-item ()
-  (interactive)
-  (monky-section-action "qremove"
-    ((unapplied patch)
-     (monky-qremove (monky-section-info (monky-current-section))))))
-
-(defun monky-qrename-item ()
-  (interactive)
-  (monky-section-action "qrename"
-    ((patch)
-     (monky-qrename (monky-section-info (monky-current-section))))))
-
-(defun monky-qfold-item ()
-  (interactive)
-  (monky-section-action "qfold"
-    ((unapplied patch)
-     (monky-qfold (monky-section-info (monky-current-section))))))
-
-(defun monky-qguard-item ()
-  (interactive)
-  (monky-section-action "qguard"
-    ((patch)
-     (monky-qguard (monky-section-info (monky-current-section))))))
-
-(defun monky-qfinish-item ()
-  (interactive)
-  (monky-section-action "qfinish"
-    ((applied patch)
-     (monky-qfinish (monky-section-info (monky-current-section))))))
 
 ;;; Log edit mode
 
@@ -3288,6 +3396,13 @@ With a non numeric prefix ARG, show all entries"
                 (append monky-hg-standard-options
                         (list "commit" "--amend" "--logfile" "-")
                         monky-staged-files))))
+      ('reword
+       (with-current-buffer (monky-find-status-buffer default-directory)
+         (apply #'monky-run-async-with-input commit-buf
+                monky-hg-executable
+                (append monky-hg-standard-options
+                        (list "commit" "--amend" "--logfile" "-")
+                        (list "--exclude" "**")))))
       ('backout
        (with-current-buffer monky-log-edit-client-buffer
          (monky-run-async-with-input commit-buf
@@ -3332,7 +3447,7 @@ With a non numeric prefix ARG, show all entries"
     (bury-buffer)
     (monky-restore-pre-log-edit-window-configuration)))
 
-(defun monky-pop-to-log-edit (operation &optional info)
+(defun monky-prepare-to-log-edit (operation &optional info)
   (let ((dir default-directory)
         (buf (get-buffer-create monky-log-edit-buffer-name)))
     (setq monky-pre-log-edit-window-configuration
@@ -3340,8 +3455,13 @@ With a non numeric prefix ARG, show all entries"
           monky-log-edit-operation operation
           monky-log-edit-client-buffer (current-buffer)
           monky-log-edit-info info)
+    (with-current-buffer buf
+      (setq default-directory dir))
+    buf))
+
+(defun monky-pop-to-log-edit (operation &optional info)
+  (let ((buf (monky-prepare-to-log-edit operation info)))
     (pop-to-buffer buf)
-    (setq default-directory dir)
     (monky-log-edit-mode)
     (message "Type C-c C-c to %s (C-c C-k to cancel)." monky-log-edit-operation)))
 
@@ -3364,6 +3484,95 @@ Brings up a buffer to allow editing of commit message."
      (list "log"
            "--template" "{desc}" "-r" ".")))
   (monky-pop-to-log-edit 'amend))
+
+;;;###autoload (autoload 'monky-commit "monky" nil t)
+(define-transient-command monky-commit ()
+  "Create a new commit or replace an existing commit."
+  ;; :info-manual "(magit)Initiating a Commit"
+  ;; :man-page "git-commit"
+  ["Arguments"
+   ;; ("-a" "Stage all modified and deleted files"   ("-a" "--all"))
+   ;; ("-e" "Allow empty commit"                     "--allow-empty")
+   ;; ("-v" "Show diff of changes to be committed"   ("-v" "--verbose"))
+   ;; ("-n" "Disable hooks"                          ("-n" "--no-verify"))
+   ;; ("-R" "Claim authorship and reset author date" "--reset-author")
+   ;; (magit:--author :description "Override the author")
+   ;; (7 "-D" "Override the author date" "--date=" transient-read-date)
+   ;; ("-s" "Add Signed-off-by line"                 ("-s" "--signoff"))
+   ;; (5 magit:--gpg-sign)
+   ;; (magit-commit:--reuse-message)
+   ]
+  [["Create"
+    ("c" "Commit"         monky-commit-create)]
+   ["Edit HEAD"
+    ("e" "Extend"         monky-commit-extend)
+    ("w" "Reword"         monky-commit-reword)
+    ("a" "Amend"          monky-commit-amend)
+    ;; (6 "n" "Reshelve"     magit-commit-reshelve)
+    ]
+   ["Edit"
+    ;; ("f" "Fixup"          magit-commit-fixup)
+    ;; ("s" "Squash"         magit-commit-squash)
+    ;; ("A" "Augment"        magit-commit-augment)
+    ("x" "Absorb changes" monky-commit-absorb)]
+   ;; [""
+   ;;  ("F" "Instant fixup"  magit-commit-instant-fixup)
+   ;;  ("S" "Instant squash" magit-commit-instant-squash)]
+   ]
+  ;; (when (not (or monky-staged-files (monky-merge-p)))
+  ;;   (if (y-or-n-p "Nothing staged. Stage and commit all changes? ")
+  ;;       (monky-stage-all)
+  ;;     (user-error "Nothing staged")))
+)
+
+(defun monky-commit-arguments ()
+  (transient-args 'monky-commit))
+
+(defalias 'monky-commit-create 'monky-log-edit)
+
+(defun monky-commit-extend ()
+  "Extends previous commit.
+Amend but does not bring up a buffer to allow editing of commit message."
+  (interactive)
+  ;; get last commit message
+  (with-current-buffer (monky-prepare-to-log-edit 'amend)
+    (erase-buffer)
+    (monky-hg-insert
+     (list "log"
+           "--template" "{desc}" "-r" "."))
+    (monky-log-edit-commit)))
+
+(defun monky-commit-reword ()
+  "Reword the commit message of the previous commit.
+Brings up a buffer to allow editing of commit message."
+  (interactive)
+  ;; get last commit message
+  (with-current-buffer (monky-prepare-to-log-edit 'reword)
+    (erase-buffer)
+    (monky-hg-insert
+     (list "log"
+           "--template" "{desc}" "-r" "."))
+    (monky-pop-to-log-edit 'reword)))
+
+(defun monky-commit-absorb ()
+  "Incorporate corrections into the stack of draft changesets."
+  (interactive)
+  (apply #'monky-run-hg-async
+         "absorb"
+         "--apply-changes"
+         monky-staged-files)
+  (monky-refresh-buffer
+   (monky-find-status-buffer default-directory)))
+
+;; (defun monky-commit-create (args)
+;;   (interactive (list (monky-commit-arguments)))
+;;   (message "args: %S" args)
+;;   (monky-log-edit))
+
+;; (defun monky-commit-create (args)
+;;   (interactive (list (monky-commit-arguments)))
+;;   (message "args: %S" args)
+;;   (monky-log-edit))
 
 (defun monky-bookmark-create (bookmark-name)
   "Create a bookmark at the current location"
