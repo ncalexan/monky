@@ -341,9 +341,7 @@ Many Monky faces inherit from this one by default."
 ;;; Compatibilities
 
 (cl-eval-when (load eval)
-  (require 'monky-margin)
-  (require 'monky-queue)
-  (require 'monky-shelve))
+  (require 'monky-margin))
 
 ;;; Utilities
 
@@ -2094,18 +2092,6 @@ CALLBACK is called with the status and the associated filename."
            (if (eq status 'unresolved) 'warning 'monky-diff-title))
           (propertize file 'face 'monky-diff-title))))
 
-;;; Untracked files
-
-(defun monky-insert-untracked-files ()
-  (monky-hg-section 'untracked "Untracked files:" #'monky-wash-files
-                    "status" "--unknown"))
-
-;;; Missing files
-
-(defun monky-insert-missing-files ()
-  (monky-hg-section 'missing "Missing files:" #'monky-wash-files
-                    "status" "--deleted"))
-
 ;;; Changes
 
 (defun monky-wash-changes ()
@@ -2317,25 +2303,38 @@ CALLBACK is called with the status and the associated filename."
         (j (json-read)))
     (delete-region p (point))
 
-    ;; (message "j %s" j)
-
-;; (defun monky-hg-section (section-title-and-type buffer-title washer &rest args)
-;;   (apply #'monky-insert-section
-;;          section-title-and-type
-;;          buffer-title
-;;          washer
-;;          monky-hg-executable
-;;          (append monky-hg-standard-options args)))
-
-    (monky-with-section "Changes:" 'changes2
+    (monky-with-section "Untracked files:" 'untracked
       (cl-loop for item across j
-               unless (alist-get 'unfinished item)
+               when (s-equals? (alist-get 'status item) "?")
+               do
+               (message "item %s" item)
+               (insert
+                (format
+                 "%s   %s\n"
+                 "untracked "
+                 (alist-get 'path item)))))
+
+    (monky-with-section "Missing files:" 'missing
+      (cl-loop for item across j
+               when (s-equals? (alist-get 'status item) "R")
+               do
+               (insert
+                (format
+                 "%s   %s\n"
+                 "missing   "
+                 (alist-get 'path item)))))
+
+    (monky-with-section "Changes:" 'changes
+      (cl-loop for item across j
+               when (or (and (not (alist-get 'status item))
+                             (alist-get 'path item))
+                        (-contains? '("M" "A" "R" "U") (alist-get 'status item)))
                do
                ;; (message "item %s" (type-of (alist-get 'status item)))
                (insert
                 (format
                  "%s   %s\n"
-                 (or (and (alist-get 'resolved item) "resolved  ")
+                 (or (and (alist-get 'resolved item)   "resolved  ")
                      (and (alist-get 'unresolved item) "unresolved")
                      (alist-get 'status item))
                  (alist-get 'path item)))))
@@ -2359,11 +2358,10 @@ CALLBACK is called with the status and the associated filename."
     (monky-with-section 'status nil
       (monky-insert-parents)
 
-      (let ((monky-hg-process-environment (seq-remove (lambda (s) (s-starts-with-p "HGPLAIN=" s)) monky-hg-process-environment)))
-        (monky-hg-section 'changes2 "Changes:"
-                          #'monky-wash-json-status
-                          "--config" "commands.status.verbose=1"
-                          "status" "-Tjson"))
+      (monky-hg-section 'changes "Changes:"
+                        #'monky-wash-json-status
+                        "--config" "commands.status.verbose=1"
+                        "status" "-Tjson")
 
       (when (monky-histedit-in-progress-p)
         (monky-insert-histedit-state))
@@ -2371,8 +2369,6 @@ CALLBACK is called with the status and the associated filename."
           (progn
             (monky-insert-merged-files)
             (monky-insert-resolved-files))
-        ;; (monky-insert-untracked-files)
-        (monky-insert-missing-files)
         (monky-insert-changes)
         (monky-insert-staged-changes)
         (monky-insert-shelves)
@@ -3553,6 +3549,11 @@ above."
        (kill-new (message "%s" (monky-section-info (monky-current-section)))))
       ((log commits commit)
        (kill-new (message "%s" (monky-section-info (monky-current-section)))))))))
+
+;; (cl-eval-when (load eval)
+  (require 'monky-queue)
+  (require 'monky-shelve)
+;; )
 
 (provide 'monky)
 
