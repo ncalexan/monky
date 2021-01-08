@@ -1,0 +1,11 @@
+[ui]
+username = test
+slash = True
+interactive = False
+merge = internal:merge
+mergemarkers = detailed
+promptecho = True
+[defaults]
+[devel]
+all-warnings = true
+default-date = 0 0

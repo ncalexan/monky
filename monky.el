@@ -1,12 +1,12 @@
-;;; monky.el --- Control Hg  -*- lexical-binding: t; -*-
+;;; monky.el --- A Mercurial/hg interface inside Emacs. -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2011 Anantha Kumaran.
 
 ;; Author: Anantha Kumaran <ananthakumaran@gmail.com>
 ;; URL: http://github.com/ananthakumaran/monky
 ;; Version: 0.2
-;; Keywords: tools
-;; Package-Requires: ((emacs "24.4") (with-editor "2.9"))
+;; Keywords: mercurial, hg, tools, vc
+;; Package-Requires: ((emacs "24.4") (with-editor "2.9") magit-section transient)
 
 ;; Monky is free software: you can redistribute it and/or modify it
 ;; under the terms of the GNU General Public License as published by
@@ -2074,7 +2074,8 @@ CALLBACK is called with the status and the associated filename."
                               (directory-file-name rootdir)) "*")))))
       (pop-to-buffer buf)
       (monky-mode-init rootdir 'status #'monky-refresh-status)
-      (monky-status-mode t))))
+      (monky-status-mode t)
+      buf)))
 
 ;;; Log mode
 
