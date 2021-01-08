@@ -2,6 +2,8 @@
 
 ;;; Queues
 
+(require 'monky-section)
+
 (defface monky-queue-patch
   '((t :weight bold :inherit (monky-header highlight)))
   "Face for patch name"

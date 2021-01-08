@@ -4,6 +4,8 @@
 
 ;; TODO: use "shelved" instead of "shelf" and "shelves".
 
+(require 'monky-section)
+
 (defun monky-list-shelved ()
   (monky-hg-lines "shelve" "--list"))
 
