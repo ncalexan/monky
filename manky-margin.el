@@ -1,11 +1,11 @@
-;;; monky-margin.el --- margins in monky buffers  -*- lexical-binding: t -*-
+;;; manky-margin.el --- margins in manky buffers  -*- lexical-binding: t -*-
 
-;; Monky is free software: you can redistribute it and/or modify it
+;; Manky is free software: you can redistribute it and/or modify it
 ;; under the terms of the GNU General Public License as published by
 ;; the Free Software Foundation, either version 3 of the License, or
 ;; (at your option) any later version.
 
-;; Monky is distributed in the hope that it will be useful, but
+;; Manky is distributed in the hope that it will be useful, but
 ;; WITHOUT ANY WARRANTY; without even the implied warranty of
 ;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
 ;; General Public License for more details.
@@ -16,7 +16,7 @@
 ;;; Commentary:
 
 ;; This library implements support for showing additional information
-;; in the margins of Monky buffers.  Currently this is only used for
+;; in the margins of Manky buffers.  Currently this is only used for
 ;; commits.
 
 ;;; Code:
@@ -105,7 +105,7 @@
 ;;     (`magit-status-mode     'magit-status-margin)
 ;;     (`forge-notifications-mode 'magit-status-margin)))
 
-(defun monky-set-buffer-margin ()
+(defun manky-set-buffer-margin ()
   ;; (when-let ((option (magit-margin-option)))
   ;;   (let* ((default (symbol-value option))
   ;;          (default-width (nth 2 default)))
@@ -118,27 +118,27 @@
   ;;               (funcall default-width style details details-width)))
   (dolist (window (get-buffer-window-list nil nil 0))
     (with-selected-window window
-      (monky-set-window-margin window)
+      (manky-set-window-margin window)
       (add-hook  'window-configuration-change-hook
-                 'monky-set-window-margin nil t))))
+                 'manky-set-window-margin nil t))))
 
               ;; (remove-hook 'window-configuration-change-hook
-              ;;              'monky-set-window-margin t)))))
+              ;;              'manky-set-window-margin t)))))
         ;; (when (and enable (or refresh ;; magit-set-buffer-margin-refresh
         ;;                       ))
-        ;;   (monky-refresh-buffer)))
+        ;;   (manky-refresh-buffer)))
 
-(defvar monky-buffer-margin-author-width 18)
-(defvar monky-buffer-margin-width 32)
+(defvar manky-buffer-margin-author-width 18)
+(defvar manky-buffer-margin-width 32)
 
-(defun monky-set-window-margin (&optional window)
+(defun manky-set-window-margin (&optional window)
   (when (or window (setq window (get-buffer-window)))
     (with-selected-window window
       (set-window-margins
        nil (car (window-margins))
-       monky-buffer-margin-width))))
+       manky-buffer-margin-width))))
 
-(defun monky-make-margin-overlay (&optional string)
+(defun manky-make-margin-overlay (&optional string)
   ;; Don't put the overlay on the complete line to work around #1880.
   (let ((o (make-overlay (1+ (line-beginning-position))
                          (line-end-position)
@@ -221,5 +221,5 @@
 ;;         magit--age-spec)))
 
 ;;; _
-(provide 'monky-margin)
-;;; monky-margin.el ends here
+(provide 'manky-margin)
+;;; manky-margin.el ends here

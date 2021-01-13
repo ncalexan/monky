@@ -46,14 +46,14 @@
               (when (get-buffer buffer-name)
                 (kill-buffer buffer-name))
               (get-buffer-create buffer-name)))
-           (default-directory (file-name-as-directory monky-repo-path))
+           (default-directory (file-name-as-directory manky-repo-path))
            (args
             (unless (equal command "")
               (s-split " " command)))
            (exit-code
             (apply
              'call-process
-             (append (list monky-hg-executable nil buffer nil) args))))
+             (append (list manky-hg-executable nil buffer nil) args))))
       (with-current-buffer buffer
         (let ((content (ecukes-ansi-clear (buffer-string))))
           (cond ((= exit-code 0)
@@ -71,9 +71,9 @@
 
 (When "^I start with a fresh repository$"
   (lambda ()
-    (when (f-dir? monky-repo-path)
-      (f-delete monky-repo-path 'force))
-    (f-mkdir monky-repo-path)
-    (let* ((default-directory (file-name-as-directory monky-repo-path)))
+    (when (f-dir? manky-repo-path)
+      (f-delete manky-repo-path 'force))
+    (f-mkdir manky-repo-path)
+    (let* ((default-directory (file-name-as-directory manky-repo-path)))
       (When "I run hg \"init\"")
-      (switch-to-buffer (monky-status)))))
+      (switch-to-buffer (manky-status)))))

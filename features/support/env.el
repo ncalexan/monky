@@ -1,22 +1,22 @@
 (require 'f)
 
-(defvar monky-support-path
+(defvar manky-support-path
   (f-dirname load-file-name))
 
-(defvar monky-features-path
-  (f-parent monky-support-path))
+(defvar manky-features-path
+  (f-parent manky-support-path))
 
-(defvar monky-root-path
-  (f-parent monky-features-path))
+(defvar manky-root-path
+  (f-parent manky-features-path))
 
-(defvar monky-repo-path
-  (f-expand "new" monky-root-path))
+(defvar manky-repo-path
+  (f-expand "new" manky-root-path))
 
-(add-to-list 'load-path monky-root-path)
+(add-to-list 'load-path manky-root-path)
 
 ;; Ensure that we don't load old byte-compiled versions
 (let ((load-prefer-newer t))
-  (require 'monky)
+  (require 'manky)
   (require 'espuds)
   (require 'ert))
 
@@ -35,7 +35,7 @@
  (setq ecukes-stderr "")
  (setq ecukes-stdout "")
 
- (let ((new-path monky-repo-path))
+ (let ((new-path manky-repo-path))
    (when (f-dir? new-path)
      (f-delete new-path 'force))))
 

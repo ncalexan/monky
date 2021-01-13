@@ -4,19 +4,19 @@ Feature: Do Some things
   I want to do something
 
   # (Before
-  #   (let ((default-directory (f-join (temporary-file-directory) (format "monky-%s" (* 0 (time-convert nil 'integer))))))
+  #   (let ((default-directory (f-join (temporary-file-directory) (format "manky-%s" (* 0 (time-convert nil 'integer))))))
   #   (shell-command "hg init")
-  #   (monky-status)))
+  #   (manky-status)))
 
   Scenario: Do Something
     # (Given "^I start with a fresh repository$"
     #    (lambda ()
-    #      (let ((default-directory (f-join (temporary-file-directory) (format "monky-%s" (* 0 (time-convert nil 'integer))))))
+    #      (let ((default-directory (f-join (temporary-file-directory) (format "manky-%s" (* 0 (time-convert nil 'integer))))))
     #        (shell-command "hg init")
-    #        (monky-status))))
+    #        (manky-status))))
     When I start with a fresh repository
     (cl-assert (< 2 1))
-    Then I should be in buffer "*monky: new*"
+    Then I should be in buffer "*manky: new*"
     Then I should see:
     """
     Changes:
@@ -28,7 +28,7 @@ Feature: Do Some things
     #   (lambda (expected)
     #   (ecukes-should-match expected ecukes-stdout)))
 
-    # Given I am in buffer "*monky: monky-0*"
+    # Given I am in buffer "*manky: manky-0*"
     # Then I should see "test2"
     # When I have "something"
     # Then I should have "something"

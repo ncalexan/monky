@@ -1,7 +1,7 @@
 (source melpa)
 (source gnu)
 
-(package-file "monky.el")
+(package-file "manky.el")
 
 (development
  (depends-on "f")
