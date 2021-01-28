@@ -572,15 +572,15 @@ command-server should be used."
 
 (defmacro monky-with-process (&rest body)
   (declare (indent 0)
-	   (debug (body)))
+	       (debug (body)))
   `(let ((outer (not monky-cmd-process)))
      (when (and outer (eq monky-process-type 'cmdserver))
        (setq monky-cmd-process (monky-cmdserver-start)))
-     (unwind-protect
-	 (progn ,@body)
+     (condition-case nil
+	     (progn ,@body)
        (when (and monky-cmd-process outer (eq monky-process-type 'cmdserver))
-	 (delete-process monky-cmd-process)
-	 (setq monky-cmd-process nil)))))
+	     (delete-process monky-cmd-process)
+	     (setq monky-cmd-process nil)))))
 
 
 
