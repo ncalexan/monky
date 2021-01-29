@@ -372,6 +372,19 @@ refreshes buffers."
            'ido-completing-read)
          args))
 
+(defun monky-start-cmdserver-process (name buffer program &rest program-args)
+  "Just like `start-process', but with stderr routed to buffer
+`monky-cmd-process-stderr-buffer-name'."
+  (unless (fboundp 'make-process)
+    (error "Emacs was compiled without subprocess support"))
+  (monky-with-process-environment
+    (apply #'make-process
+	       (append (list :name name :buffer buffer
+                         :stderr (get-buffer-create monky-cmd-process-stderr-buffer-name)
+                         :file-handler t)
+		           (if program
+		               (list :command (cons program program-args)))))))
+
 (defun monky-start-process (&rest args)
   (monky-with-process-environment
     (apply (if (functionp 'start-file-process)
@@ -390,6 +403,7 @@ refreshes buffers."
 
 (defvar monky-cmd-process nil)
 (defvar monky-cmd-process-buffer-name "*monky-cmd-process*")
+(defvar monky-cmd-process-stderr-buffer-name "*monky-cmd-process-stderr*")
 (defvar monky-cmd-process-input-buffer nil)
 (defvar monky-cmd-process-input-point nil)
 (defvar monky-cmd-error-message nil)
@@ -452,9 +466,10 @@ refreshes buffers."
                 (with-current-buffer buffer
                   (bury-buffer))))
       (setq default-directory dir)
-      (let ((monky-cmd-process (monky-start-process
-                                "monky-hg" buf "sh" "-c"
-                                (format "%s --config extensions.mq= serve --cmdserver pipe 2> /dev/null" monky-hg-executable))))
+      (let ((monky-cmd-process (monky-start-cmdserver-process
+                                "monky-hg" buf
+                                monky-hg-executable
+                                "--config" "extensions.mq=" "serve" "--cmdserver" "pipe")))
         (set-process-coding-system monky-cmd-process 'no-conversion 'no-conversion)
         (set-process-sentinel monky-cmd-process #'monky-cmdserver-sentinel)
         (setq monky-cmd-hello-message
