@@ -572,18 +572,37 @@ refreshes buffers."
               (insert monky-cmd-error-message)))))
         result))))
 
+(defcustom monky-hg-verbose nil
+  "Whether to invoke Hg verbosely."
+  :group 'monky
+  :type 'boolean)
+
 (defun monky-process-file (&rest args)
   "Same as `process-file' in the current hg environment.
 This function either calls `monky-cmdserver-process-file' or
 `monky-process-file-single' depending on whether the hg
 command-server should be used."
-  ;; (message "monky-process-file: %s" args)
-  (apply (cond
-          (monky-cmd-process #'monky-cmdserver-process-file)
-          ;; ((eq monky-process-type 'cmdserver)
-          ;;  (error "No process started (forget `monky-with-process`?)"))
-          (t #'monky-process-file-single))
-         args))
+  (let ((f (lambda ()
+             (apply (cond
+                     (monky-cmd-process #'monky-cmdserver-process-file)
+                     ;; ((eq monky-process-type 'cmdserver)
+                     ;;  (error "No process started (forget `monky-with-process`?)"))
+                     (t #'monky-process-file-single))
+                    args))))
+    (if (not monky-hg-verbose)
+        (funcall f)
+      (require 'benchmark)
+      (let ((result nil))
+        (message "  %6f  %-50s"
+                 (benchmark-elapse (setq result (funcall f)))
+                 (progn
+                   (when (and args (equal (car args) monky-hg-executable))
+                     (setq args (cons (file-name-nondirectory monky-hg-executable)
+                                      (cons (char-to-string monky-ellipsis)
+                                            (-map #'shell-quote-argument
+                                                  (-drop (+ (length monky-hg-standard-options) 4) args))))))
+                   (mapconcat #'identity args " ")))
+        result))))
 
 (defmacro monky-with-process (&rest body)
   (declare (indent 0)
