@@ -2020,53 +2020,63 @@ CALLBACK is called with the status and the associated filename."
         (j (json-read)))
     (delete-region p (point))
 
-    (monky-with-section "Untracked files:" 'untracked
+    (monky-with-section 'untracked nil
+      (insert (propertize "Untracked files:" 'face 'monky-section-title) "\n")
       (cl-loop for item across j
                when (s-equals? (alist-get 'status item) "?")
                do
-               (message "item %s" item)
-               (insert
-                (format
-                 "%s   %s\n"
-                 "untracked "
-                 (alist-get 'path item)))))
+               (let ((file (alist-get 'path item)))
+                 (monky-with-section file 'file
+                   (monky-set-section-info file)
+                   (insert (format
+                            "%s   %s\n"
+                            "untracked "
+                            file))))))
 
-    (monky-with-section "Missing files:" 'missing
+    (monky-with-section 'missing nil
+      (insert (propertize "Missing files:" 'face 'monky-section-title) "\n")
       (cl-loop for item across j
-               when (s-equals? (alist-get 'status item) "R")
+               when (s-equals? (alist-get 'status item) "!")
                do
-               (insert
-                (format
-                 "%s   %s\n"
-                 "missing   "
-                 (alist-get 'path item)))))
+               (let ((file (alist-get 'path item)))
+                 (monky-with-section file 'file
+                   (monky-set-section-info file)
+                   (insert (format
+                            "%s   %s\n"
+                            "missing "
+                            file))))))
 
-    (monky-with-section "Changes:" 'changes
+    (monky-with-section 'changes nil
+      (insert (propertize "Changes:" 'face 'monky-section-title) "\n")
       (cl-loop for item across j
                when (or (and (not (alist-get 'status item))
                              (alist-get 'path item))
                         (-contains? '("M" "A" "R" "U") (alist-get 'status item)))
                do
-               ;; (message "item %s" (type-of (alist-get 'status item)))
-               (insert
-                (format
-                 "%s   %s\n"
-                 (or (and (alist-get 'resolved item)   "resolved  ")
-                     (and (alist-get 'unresolved item) "unresolved")
-                     (alist-get 'status item))
-                 (alist-get 'path item)))))
+               (let ((file (alist-get 'path item))
+                     (status (or (and (alist-get 'resolved item)   "resolved  ")
+                                 (and (alist-get 'unresolved item) "unresolved")
+                                 (alist-get 'status item))))
+                 (monky-with-section file 'file
+                   (monky-set-section-info file)
+                   (insert (format
+                            "%s   %s\n"
+                            status
+                            file))))))
 
-    (monky-with-section "Unfinished:" 'unfinished
+    (monky-with-section 'unfinished nil
+      (insert (propertize "Unfinished:" 'face 'monky-section-title) "\n")
       (cl-loop for item across j
                when (alist-get 'unfinished item)
                do
-               ;; (message "item %s" item)
-               (insert
-                (format
-                 "%s   %s\n"
-                 (alist-get 'unfinished item)
-                 (alist-get 'unfinishedmsg item)))))
-))
+               (let ((file (alist-get 'unfinishedmsg item))
+                     (status (alist-get 'unfinished item)))
+                 (monky-with-section file 'file
+                   (monky-set-section-info file)
+                   (insert (format
+                            "%s   %s\n"
+                            status
+                            file))))))))
 
 (defun monky-refresh-status ()
   (setq monky-parents nil
