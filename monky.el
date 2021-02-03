@@ -1544,10 +1544,15 @@ before the last command."
     (monky-get-local-root-dir)))
 
 (defun monky-get-local-root-dir ()
-  (let ((root (monky-hg-string "root")))
-    (if root
-	(concat root "/")
-      (user-error "Not inside a hg repo"))))
+  (if-let (monky-cmd-process
+           (buf (process-buffer monky-cmd-process))
+           (buffer-live-p buf))
+      (with-current-buffer buf
+        default-directory)
+    (let ((root (monky-hg-string "root")))
+      (if root
+	      (concat root "/")
+        (user-error "Not inside a hg repo")))))
 
 (defun monky-get-tramp-root-dir ()
   (let ((root (monky-hg-string "root"))
