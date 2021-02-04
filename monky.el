@@ -3016,28 +3016,6 @@ edit.  With a prefix argument the old message is reused as-is."
 	        (monky-section-info (monky-section-at (monky-previous-sha1 (- (region-end) 1)))))
        (monky-prune (monky-section-info (monky-current-section)))))))
 
-(defun monky-mozilla-review (node-1 &optional node-2)
-  "`moz-phab submit` revision NODE-1 or topological revision range NODE-1::NODE-2."
-  (let ((default-directory (monky-get-root-dir))
-        (nodes (if (and node-2 (not (string= node-1 node-2)))
-                   (list node-2 node-1)
-                 (list "--single" node-1))))
-    (monky-with-refresh
-      ;; TODO: use a compilation buffer?  Use the *monky-process* buffer?
-      (apply 'start-process "moz-phab" "*moz-phab*" "moz-phab" "submit"
-             nodes))))
-
-(defun monky-mozilla-review-item ()
-  "`moz-phab submit` the revision(s) represented by the current item or region."
-  (interactive)
-  (monky-section-action "review"
-    ((log commits commit)
-     (if (region-active-p)
-	       (monky-mozilla-review
-	        (monky-section-info (monky-section-at (monky-next-sha1 (region-beginning))))
-	        (monky-section-info (monky-section-at (monky-previous-sha1 (- (region-end) 1)))))
-       (monky-mozilla-review (monky-section-info (monky-current-section)))))))
-
 ;;; Log edit mode
 
 (define-derived-mode monky-log-edit-mode text-mode "Monky Log Edit")
