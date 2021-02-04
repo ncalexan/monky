@@ -3003,7 +3003,9 @@ edit.  With a prefix argument the old message is reused as-is."
 (defun monky-prune (node-1 &optional node-2)
   "Prune revision NODE-1 or topological revision range NODE-2::NODE-1."
   (monky-run-hg "prune" "--rev"
-                (if node-2 (concat node-2 "::" node-1) node-1)))
+                (if (and node-2 (not (string= node-1 node-2)))
+                    (concat node-2 "::" node-1)
+                  node-1)))
 
 (defun monky-prune-item ()
   "Prune the revision(s) represented by the current item or region."
@@ -3011,9 +3013,9 @@ edit.  With a prefix argument the old message is reused as-is."
   (monky-section-action "prune"
     ((log commits commit)
      (if (region-active-p)
-	       (monky-prune
-	        (monky-section-info (monky-section-at (monky-next-sha1 (region-beginning))))
-	        (monky-section-info (monky-section-at (monky-previous-sha1 (- (region-end) 1)))))
+	     (monky-prune
+	      (monky-section-info (monky-section-at (monky-next-sha1 (region-beginning))))
+	      (monky-section-info (monky-section-at (monky-previous-sha1 (- (region-end) 1)))))
        (monky-prune (monky-section-info (monky-current-section)))))))
 
 ;;; Log edit mode
@@ -3108,6 +3110,11 @@ edit.  With a prefix argument the old message is reused as-is."
     (with-current-buffer buf
       (setq default-directory dir))
     buf))
+
+;; Rebasing branch1 onto branch2
+;; pick 5e757be z
+;; join fac365a y
+;; onto f5c24c7 b
 
 (defun monky-pop-to-log-edit (operation &optional info)
   (let ((buf (monky-prepare-to-log-edit operation info)))
