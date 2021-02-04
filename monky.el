@@ -415,10 +415,6 @@ refreshes buffers."
 (defvar monky-cmd-hello-message nil
   "Variable to store parsed hello message.")
 
-;; TODO: does this need to be permanent? If it's only used in monky buffers (not source file buffers), it shouldn't be.
-(defvar-local monky-root-dir nil)
-(put 'monky-root-dir 'permanent-local t)
-
 (defun monky-cmdserver-sentinel (proc _change)
   (unless (memq (process-status proc) '(run stop))
     (delete-process proc)))
@@ -428,6 +424,9 @@ refreshes buffers."
     (while (< (point-max) size)
       (accept-process-output monky-cmd-process 0.1 nil t))
     (let ((str (buffer-substring (point-min) (+ (point-min) size))))
+      (when (bound-and-true-p monky-cmdserver-verbose)
+        (with-current-buffer (get-buffer-create "*monky-cmd-buffer-debug*")
+          (insert "> " str "\n")))
       (delete-region (point-min) (+ (point-min) size))
       (goto-char (point-min))
       str)))
@@ -453,13 +452,8 @@ refreshes buffers."
                                data)))
 
 (defun monky-cmdserver-start ()
-  (unless monky-root-dir
-    (let (monky-process monky-process-type)
-      (setq monky-root-dir (monky-get-root-dir))))
-
-  (let ((dir monky-root-dir)
+  (let ((dir (temporary-file-directory))
         (buf (get-buffer-create monky-cmd-process-buffer-name))
-        (default-directory monky-root-dir)
         (process-connection-type nil))
     (with-current-buffer buf
       (setq buffer-read-only nil)
@@ -507,13 +501,17 @@ refreshes buffers."
           (intern (downcase (cdr e)))))
       default)))
 
-(defun monky-cmdserver-runcommand (&rest cmd-and-args)
+(defun monky-cmdserver-runcommand (cwd &rest cmd-and-args)
   (setq monky-cmd-error-message nil)
   (with-current-buffer (process-buffer monky-cmd-process)
     (setq buffer-read-only nil)
     (erase-buffer))
   (process-send-string monky-cmd-process "runcommand\n")
-  (monky-cmdserver-write (mapconcat #'identity cmd-and-args "\0"))
+  (let ((args (cons "--cwd" (cons cwd cmd-and-args))))
+    (when (bound-and-true-p monky-cmdserver-verbose)
+      (with-current-buffer (get-buffer-create "*monky-cmd-buffer-debug*")
+        (insert "< " (mapconcat #'shell-quote-argument args " ") "\n")))
+    (monky-cmdserver-write (mapconcat #'identity args "\0")))
   (let* ((inhibit-read-only t)
          (start (point))
          (result
@@ -557,15 +555,16 @@ refreshes buffers."
   (if (or infile display)
       (apply #'monky-process-file-single program infile buffer display args)
     (let ((stdout (if (consp buffer) (car buffer) buffer))
-          (stderr (and (consp buffer) (cadr buffer))))
+          (stderr (and (consp buffer) (cadr buffer)))
+          (cwd default-directory))
       (if (eq stdout t) (setq stdout (current-buffer)))
       (if (eq stderr t) (setq stderr stdout))
       (let ((result
              (if stdout
                  (with-current-buffer stdout
-                   (apply #'monky-cmdserver-runcommand args))
+                   (apply #'monky-cmdserver-runcommand cwd args))
                (with-temp-buffer
-                 (apply #'monky-cmdserver-runcommand args)))))
+                 (apply #'monky-cmdserver-runcommand cwd args)))))
         (cond
          ((bufferp stderr)
           (when monky-cmd-error-message
@@ -920,7 +919,7 @@ as arguments."
   						         (with-current-buffer input
   						           (point-min)))))
   		 (setq successp
-  		       (equal (apply #'monky-cmdserver-runcommand (cdr cmd-and-args)) 0))
+  		       (equal (apply #'monky-cmdserver-runcommand dir (cdr cmd-and-args)) 0))
   		 (monky-set-mode-line-process nil)
   		 (monky-need-refresh monky-process-client-buffer)))
                 (input
@@ -1568,15 +1567,12 @@ before the last command."
     (monky-get-local-root-dir)))
 
 (defun monky-get-local-root-dir ()
-  (if-let (monky-cmd-process
-           (buf (process-buffer monky-cmd-process))
-           (buffer-live-p buf))
-      (with-current-buffer buf
-        default-directory)
-    (let ((root (monky-hg-string "root")))
-      (if root
-	      (concat root "/")
-        (user-error "Not inside a hg repo")))))
+  (if-let ((root (locate-dominating-file default-directory ".hg"))
+           (root (file-truename root)))
+      (if (s-ends-with? "/" root)
+          root
+	    (concat root "/"))
+    (user-error "Not inside a hg repo %s" default-directory)))
 
 (defun monky-get-tramp-root-dir ()
   (let ((root (monky-hg-string "root"))
@@ -2286,14 +2282,12 @@ PROPERTIES is the arguments for the function `propertize'."
 
 (defun monky-log-setup-buffer (args &optional cmd)
   (monky-with-process
-    (let ((topdir (monky-get-root-dir))
+    (let ((default-directory (monky-get-root-dir))
           (refresh-func (pcase cmd
                           ('olog #'monky-refresh-olog-buffer)
                           (_ #'monky-refresh-log-buffer))))
       (pop-to-buffer (monky-log-buffer-name))
-      (setq default-directory topdir
-            monky-root-dir topdir)
-      (monky-mode-init topdir 'log (funcall refresh-func args))
+      (monky-mode-init default-directory 'log (funcall refresh-func args))
       (monky-log-mode t)
       (monky-set-buffer-margin)
       ;; (dolist (window (get-buffer-window-list nil nil 0))
@@ -2460,7 +2454,7 @@ With a non numeric prefix ARG, show all entries"
        'commits
        (if-let ((path (and (-contains-p args "--") (car (last path)))))
            (format "Commits affecting %s:"
-                   (file-relative-name path monky-root-dir))
+                   (file-relative-name path (monky-get-root-dir)))
          "Commits:")
        #'monky-wash-logs
        "log"
@@ -2481,7 +2475,7 @@ With a non numeric prefix ARG, show all entries"
        'commits
        (if-let ((path (and (-contains-p args "--") (car (last path)))))
            (format "Commits affecting %s:"
-                   (file-relative-name path monky-root-dir))
+                   (file-relative-name path (monky-get-root-dir)))
          "Commits:")
        #'monky-wash-logs
        "olog"
@@ -3252,6 +3246,7 @@ Brings up a buffer to allow editing of commit message."
   "Create a bookmark at the current location"
   (interactive "sBookmark name: ")
   (monky-run-hg-async "bookmark" bookmark-name))
+
 
 ;; TODO: consider not killing `*monky...`.
 (defun monky-killall-monky-buffers ()
