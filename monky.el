@@ -83,7 +83,7 @@ save all modified buffers without asking."
                  (const :tag "Immediately" 0)
                  (integer :tag "After this many seconds")))
 
-(defcustom monky-log-cutoff-length 100
+(defcustom monky-log-cutoff-length 30
   "The maximum number of commits to show in the log buffer."
   :group 'monky
   :type 'integer)
@@ -1369,7 +1369,7 @@ With a prefix argument, visit in other window."
          (basic-save-buffer))
        (monky-refresh-buffer)))
     ((untracked)
-     (message "untracked %s" (monky-section-info (monky-current-section))))
+     (message "untracked %s" (type-of (monky-section-info (monky-current-section)))))
     ((changes diff)
      (monky-revert-file (monky-diff-item-file (monky-current-section))))
     ((staged diff)
@@ -1973,25 +1973,6 @@ CALLBACK is called with the status and the associated filename."
             (insert (propertize title 'face 'monky-section-title) "\n")
             (goto-char (point-max))))))))
 
-  ;;         ))))))
-
-  ;;   (defun insert-histedit-state ()
-  ;;       (forward-char len)))
-  ;;   (let ((section (monky-insert-section
-  ;;                   'histedit-state
-  ;;                   "Histedit between XXX"
-  ;;                   #'monky-wash-histedit-state
-  ;;                   #'insert-histedit-state
-  ;;                   )))
-  ;;     ;; (setf (monky-section-title section) "Test")
-  ;;     section)))
-
-
-  ;; ;;  (append monky-hg-standard-options args)))
-  ;; ;; ;; ;; (let ((monky-hide-diffs t))
-  ;; ;; ;; ;;   (setq monky-merged-files '())
-  ;; ;; ;; (monky-hg-section 'merged "Merged Files:" #'monky-wash-merged-files
-  ;; ;; ;;                   "resolve" "--list")))
 (defun monky-insert-rebase-state ()
   ; (when (monky-rebase-in-progress-p)
     (with-temp-buffer
@@ -2913,7 +2894,7 @@ edit.  With a prefix argument the old message is reused as-is."
                           (list (substring line 0 40)
                                 (substring line 41 80))))))
       (list rules subs))))
-  
+
 
 (defun monky-rebase-arguments ()
   (transient-args 'monky-rebase))
@@ -2949,7 +2930,7 @@ edit.  With a prefix argument the old message is reused as-is."
 
     ;; (when-let ((arg (--remove-first (member it (list "--base" "--rev")) args)))
     ;;   (setq args (concat args (list arg (car (monky-region-range))))))
-    
+
     ;; (message "rev-onto-dest %S" args)
     (monky-hg-rebase (append args (list "--source" rev "--dest" dest)))
     ;; (message "Rebasing... done")
@@ -2968,7 +2949,7 @@ edit.  With a prefix argument the old message is reused as-is."
 
     ;; (when-let ((arg (--remove-first (member it (list "--base" "--source")) args)))
     ;;   (setq args (concat args (list arg (car (monky-region-range))))))
-    
+
     ;; (message "source-onto-dest %S" args)
     (monky-hg-rebase (append args (list "--base" rev "--dest" dest)))
     ;; (message "Rebasing... done")
@@ -2987,7 +2968,7 @@ edit.  With a prefix argument the old message is reused as-is."
 
     ;; (when-let ((arg (--remove-first (member it (list "--base" "--source")) args)))
     ;;   (setq args (concat args (list arg (car (monky-region-range))))))
-    
+
     ;; (message "source-onto-dest %S" args)
     (monky-hg-rebase (append args (list "--rev" rev "--dest" dest)))
     ;; (message "Rebasing... done")
