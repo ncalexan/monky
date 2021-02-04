@@ -1992,6 +1992,24 @@ CALLBACK is called with the status and the associated filename."
   ;; ;; ;; ;;   (setq monky-merged-files '())
   ;; ;; ;; (monky-hg-section 'merged "Merged Files:" #'monky-wash-merged-files
   ;; ;; ;;                   "resolve" "--list")))
+(defun monky-insert-rebase-state ()
+  ; (when (monky-rebase-in-progress-p)
+    (with-temp-buffer
+      (insert-file-contents (f-join (monky-get-root-dir) ".hg" "rebasestate"))
+      (unless (re-search-forward "^\\([0-9a-f]+\\):\\(.*?\\):[0-9a-f]+$" nil t)
+        (error "Malformed .hg/rebasestate"))
+      (beginning-of-line)
+      (delete-region (point-min) (point))
+      (let* ((entries (cl-loop
+                       while (re-search-forward "^\\([0-9a-f]+\\):\\(.*?\\):[0-9a-f]+$" nil t)
+                       collect (list (match-string-no-properties 1)
+                                     (match-string-no-properties 2))))
+             (revs (--mapcat (list "-r" it)
+                             (--filter (not (s-equals? "-1" it))
+                                       (-flatten entries))))
+             (revmap (--map (s-split "\0" it) (apply #'monky-hg-lines "log" "--template" "{node}\\0{desc|strip|firstline}\\n" revs))))
+        (message "%S" revmap)
+        revmap)))
 
 (defun monky-insert-merged-files ()
   (let ((monky-hide-diffs t))
@@ -2092,6 +2110,8 @@ CALLBACK is called with the status and the associated filename."
 
       (when (monky-histedit-in-progress-p)
         (monky-insert-histedit-state))
+      (when (monky-rebase-in-progress-p)
+        (monky-insert-rebase-state))
       (if (monky-merge-p)
           (progn
             (monky-insert-merged-files)
