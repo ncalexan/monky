@@ -398,8 +398,13 @@ refreshes buffers."
 
 ;; Command server
 (defvar monky-process nil)
-(defvar monky-process-buffer-name "*monky-process*")
 (defvar monky-process-client-buffer nil)
+
+(defun monky-process-buffer-name (&optional dir)
+  (format
+   "monky-process: %s"
+   (file-name-nondirectory
+    (directory-file-name (or dir default-directory)))))
 
 (defvar monky-cmd-process nil)
 (defvar monky-cmd-process-buffer-name "*monky-cmd-process*")
@@ -857,12 +862,12 @@ as arguments."
 (defun monky-run* (cmd-and-args
 		   &optional logline noerase noerror nowait input)
   (if (and monky-process
-           (get-buffer monky-process-buffer-name))
+           (get-buffer (monky-process-buffer-name)))
       (error "Hg is already running"))
   (let ((cmd (car cmd-and-args))
         (args (cdr cmd-and-args))
         (dir default-directory)
-        (buf (get-buffer-create monky-process-buffer-name))
+        (buf (get-buffer-create (monky-process-buffer-name)))
         (successp nil))
     (with-editor
       (monky-set-mode-line-process
@@ -946,7 +951,7 @@ as arguments."
             noerror
             (error
              (or monky-cmd-error-message
-  	       (monky-abort-message (get-buffer monky-process-buffer-name))
+  	       (monky-abort-message (get-buffer (monky-process-buffer-name)))
                  "Hg failed")))
         successp))))
 
@@ -1018,9 +1023,9 @@ as arguments."
 (defun monky-display-process ()
   "Display output from most recent hg command."
   (interactive)
-  (unless (get-buffer monky-process-buffer-name)
+  (unless (get-buffer (monky-process-buffer-name))
     (user-error "No Hg commands have run"))
-  (display-buffer monky-process-buffer-name))
+  (display-buffer (monky-process-buffer-name)))
 
 (defun monky-hg-command (command)
   "Perform arbitrary Hg COMMAND."
@@ -2119,9 +2124,9 @@ CALLBACK is called with the status and the associated filename."
     (let* ((rootdir (or directory (monky-get-root-dir)))
            (buf (or (monky-find-status-buffer rootdir)
                     (generate-new-buffer
-                     (concat "*monky: "
+                     (concat "monky: "
                              (file-name-nondirectory
-                              (directory-file-name rootdir)) "*")))))
+                              (directory-file-name rootdir)))))))
       (pop-to-buffer buf)
       (monky-mode-init rootdir 'status #'monky-refresh-status)
       (monky-status-mode t)
@@ -2138,7 +2143,11 @@ CALLBACK is called with the status and the associated filename."
   :lighter ()
   :keymap monky-log-mode-map)
 
-(defvar monky-log-buffer-name "*monky-log*")
+(defun monky-log-buffer-name (&optional dir)
+  (format
+   "monky-log: %s"
+   (file-name-nondirectory
+    (directory-file-name (or dir default-directory)))))
 
 (defun monky-propertize-labels (label-list &rest properties)
   "Propertize labels (tag/branch/bookmark/...) in LABEL-LIST.
@@ -2281,7 +2290,7 @@ PROPERTIES is the arguments for the function `propertize'."
           (refresh-func (pcase cmd
                           ('olog #'monky-refresh-olog-buffer)
                           (_ #'monky-refresh-log-buffer))))
-      (pop-to-buffer monky-log-buffer-name)
+      (pop-to-buffer (monky-log-buffer-name))
       (setq default-directory topdir
             monky-root-dir topdir)
       (monky-mode-init topdir 'log (funcall refresh-func args))
@@ -2550,7 +2559,7 @@ With a non numeric prefix ARG, show all entries"
           (line-num (line-number-at-pos))
           (column (current-column)))
       (pop-to-buffer
-       (format "*monky-blame: %s*"
+       (format "monky-blame: %s"
                (file-name-nondirectory buffer-file-name)))
       (monky-mode-init topdir 'blame #'monky-refresh-blame-buffer file-name)
       (monky-blame-mode t)
@@ -2575,7 +2584,11 @@ With a non numeric prefix ARG, show all entries"
   :lighter ()
   :keymap monky-commit-mode-map)
 
-(defvar monky-commit-buffer-name "*monky-commit*")
+(defun monky-commit-buffer-name (&optional dir)
+  (format
+   "monky-commit: %s"
+   (file-name-nondirectory
+    (directory-file-name (or dir default-directory)))))
 
 (defun monky-empty-buffer-p (buffer)
   (with-current-buffer buffer
@@ -2589,7 +2602,7 @@ With a non numeric prefix ARG, show all entries"
                  (monky-hg-revision-p commit))
       (error "%s is not a commit" commit))
     (let ((topdir (monky-get-root-dir))
-          (buffer (get-buffer-create monky-commit-buffer-name)))
+          (buffer (get-buffer-create (monky-commit-buffer-name))))
       (cond
        ((and scroll
 	     (not (monky-empty-buffer-p buffer)))
@@ -2639,7 +2652,11 @@ With a non numeric prefix ARG, show all entries"
   :lighter ()
   :keymap monky-branches-mode-map)
 
-(defvar monky-branches-buffer-name "*monky-branches*")
+(defun monky-branches-buffer-name (&optional dir)
+  (format
+   "monky-branches: %s"
+   (file-name-nondirectory
+    (directory-file-name (or dir default-directory)))))
 
 (defvar monky-branch-re "^\\(.*[^\s]\\)\s* \\([0-9]+\\):\\([0-9a-z]\\{12\\}\\)\\(.*\\)$")
 
@@ -2685,7 +2702,7 @@ With a non numeric prefix ARG, show all entries"
 (defun monky-branches ()
   (interactive)
   (let ((topdir (monky-get-root-dir)))
-    (pop-to-buffer monky-branches-buffer-name)
+    (pop-to-buffer (monky-branches-buffer-name))
     (monky-mode-init topdir 'branches #'monky-refresh-branches-buffer)
     (monky-branches-mode t)))
 
@@ -3236,9 +3253,12 @@ Brings up a buffer to allow editing of commit message."
   (interactive "sBookmark name: ")
   (monky-run-hg-async "bookmark" bookmark-name))
 
+;; TODO: consider not killing `*monky...`.
 (defun monky-killall-monky-buffers ()
   (interactive)
-  (cl-flet ((monky-buffer-p (b) (string-match "\*monky\\(:\\|-\\).*" (buffer-name b))))
+  (cl-flet ((monky-buffer-p (b) (and
+                                 (null (buffer-file-name b)) ; Is this correct for `monky-blame: ...` buffers?
+                                 (string-match "^\\*?monky\\(:\\|-\\).*" (buffer-name b)))))
     (let ((monky-buffers (cl-remove-if-not #'monky-buffer-p (buffer-list))))
       (cl-loop for mb in monky-buffers
                do

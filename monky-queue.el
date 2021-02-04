@@ -73,7 +73,11 @@
   :lighter ()
   :keymap monky-queue-mode-map)
 
-(defvar monky-queue-buffer-name "*monky-queue*")
+(defun monky-queue-buffer-name (&optional dir)
+  (format
+   "monky-queue: %s"
+   (file-name-nondirectory
+    (directory-file-name (or dir default-directory)))))
 
 (defvar-local monky-patches-dir ".hg/patches/")
 
@@ -263,7 +267,7 @@
   (interactive)
   (monky-with-process
     (let ((topdir (monky-get-root-dir)))
-      (pop-to-buffer monky-queue-buffer-name)
+      (pop-to-buffer (monky-queue-buffer-name))
       (monky-mode-init topdir 'queue #'monky-refresh-queue-buffer)
       (monky-queue-mode t))))
 
