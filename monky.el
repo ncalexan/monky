@@ -3395,7 +3395,8 @@ Brings up a buffer to allow editing of commit message."
     (let ((monky-buffers (cl-remove-if-not #'monky-buffer-p (buffer-list))))
       (cl-loop for mb in monky-buffers
                do
-               (kill-buffer mb)))))
+               (kill-buffer mb))))
+  (setq monky-cmdserver-process nil))
 
 ;;;###autoload
 (defun monky-copy-section-value ()
