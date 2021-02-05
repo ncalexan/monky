@@ -3285,10 +3285,10 @@ Brings up a buffer to allow editing of commit message."
     ;; (6 "n" "Reshelve"     magit-commit-reshelve)
     ]
    ["Edit"
-    ;; ("f" "Fixup"          magit-commit-fixup)
-    ;; ("s" "Squash"         magit-commit-squash)
+    ("x" "Absorb changes" monky-commit-absorb)
+    ("f" "Fold"           monky-commit-fold)]
+    ;; ("r" "Roll"           monky-commit-roll)
     ;; ("A" "Augment"        magit-commit-augment)
-    ("x" "Absorb changes" monky-commit-absorb)]
    ;; [""
    ;;  ("F" "Instant fixup"  magit-commit-instant-fixup)
    ;;  ("S" "Instant squash" magit-commit-instant-squash)]
@@ -3338,15 +3338,25 @@ Brings up a buffer to allow editing of commit message."
   (monky-refresh-buffer
    (monky-find-status-buffer default-directory)))
 
-;; (defun monky-commit-create (args)
-;;   (interactive (list (monky-commit-arguments)))
-;;   (message "args: %S" args)
-;;   (monky-log-edit))
-
-;; (defun monky-commit-create (args)
-;;   (interactive (list (monky-commit-arguments)))
-;;   (message "args: %S" args)
-;;   (monky-log-edit))
+(defun monky-commit-fold (&optional rev)
+  "XXX"
+  (interactive)
+  (when (monky-merge-p)
+    ;; TODO: nor during a rebase, a histedit, etc.
+    (user-error "Cannot commit during a merge."))
+  (when (not (or monky-staged-files))
+    ;; TODO: check for nothing staged, even after `monky-stage-all'!
+    (if (y-or-n-p "Nothing staged. Stage and commit all changes? ")
+        (monky-stage-all)
+      (user-error "Nothing staged")))
+  (if (not rev)
+      (monky-log-select #'monky-commit-fold)
+    (let ((msg (monky-hg-string "log" "--template" "fold! {desc|firstline}\n" "-r" rev)))
+      (with-current-buffer (monky-prepare-to-log-edit 'commit)
+        (monky-hg-insert
+         (list "log" "--template" "fold! {desc|firstline}\n" "-r" rev))
+        (monky-log-edit-commit))
+      (message "rev: %s (%S) %s" rev monky-staged-files msg))))
 
 (defun monky-bookmark-create (bookmark-name)
   "Create a bookmark at the current location"
