@@ -3286,7 +3286,8 @@ Brings up a buffer to allow editing of commit message."
     ]
    ["Edit"
     ("x" "Absorb changes" monky-commit-absorb)
-    ("f" "Fold"           monky-commit-fold)]
+    ("f" "Fold"           monky-commit-fold)
+    ("F" "Instant fold"   monky-commit-instant-fold)]
     ;; ("r" "Roll"           monky-commit-roll)
     ;; ("A" "Augment"        magit-commit-augment)
    ;; [""
@@ -3356,6 +3357,27 @@ Brings up a buffer to allow editing of commit message."
         (monky-hg-insert
          (list "log" "--template" "fold! {desc|firstline}\n" "-r" rev))
         (monky-log-edit-commit))
+      (message "rev: %s (%S) %s" rev monky-staged-files msg))))
+
+(defun monky-commit-instant-fold (&optional rev)
+  "XXX"
+  (interactive)
+  (when (monky-merge-p)
+    ;; TODO: nor during a rebase, a histedit, etc.
+    (user-error "Cannot commit during a merge."))
+  (when (not (or monky-staged-files))
+    ;; TODO: check for nothing staged, even after `monky-stage-all'!
+    (if (y-or-n-p "Nothing staged. Stage and commit all changes? ")
+        (monky-stage-all)
+      (user-error "Nothing staged")))
+  (if (not rev)
+      (monky-log-select #'monky-commit-fold)
+    (let ((msg (monky-hg-string "log" "--template" "fold! {desc|firstline}\n" "-r" rev)))
+      (with-current-buffer (monky-prepare-to-log-edit 'commit)
+        (monky-hg-insert
+         (list "log" "--template" "fold! {desc|firstline}\n" "-r" rev))
+        (monky-log-edit-commit))
+      ;; TODO: shelve all, histedit down, histedit fold, unshelve all.
       (message "rev: %s (%S) %s" rev monky-staged-files msg))))
 
 (defun monky-bookmark-create (bookmark-name)
