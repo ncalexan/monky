@@ -2496,6 +2496,112 @@ With a non numeric prefix ARG, show all entries"
     (setq pos (previous-single-property-change pos 'face)))
   pos)
 
+;;; Log-select mode
+
+(defvar monky-log-select-mode-map
+  (let ((map (make-sparse-keymap)))
+    (set-keymap-parent map monky-log-mode-map)
+    (define-key map "\C-c\C-b" 'undefined)
+    (define-key map "\C-c\C-f" 'undefined)
+    (define-key map "."        'monky-log-select-pick)
+    (define-key map "e"        'monky-log-select-pick)
+    (define-key map "\C-c\C-c" 'monky-log-select-pick)
+    (define-key map "q"        'monky-log-select-quit)
+    (define-key map "\C-c\C-k" 'monky-log-select-quit)
+    map)
+  "Keymap for `monky-log-select-mode'.")
+
+(put 'monky-log-select-pick :advertised-binding [?\C-c ?\C-c])
+(put 'monky-log-select-quit :advertised-binding [?\C-c ?\C-k])
+
+;; TODO: use major modes, like magit, so that we can inherit from
+;; `monky-log-mode'.
+(define-minor-mode monky-log-select-mode
+  "Minor mode for selecting commits from hg log.
+
+\\{monky-log-select-mode-map}"
+  :group monky
+  :init-value ()
+  :lighter ()
+  :keymap monky-log-select-mode-map)
+
+(defun monky-log-select-buffer-name (&optional dir)
+  (format
+   "monky-log-select: %s"
+   (file-name-nondirectory
+    (directory-file-name (or dir default-directory)))))
+
+(defun monky-log-select-setup-buffer (args)
+  (monky-with-process
+    (let ((default-directory (monky-get-root-dir))
+          (refresh-func #'monky-refresh-log-buffer))
+      (pop-to-buffer (monky-log-select-buffer-name))
+      (monky-mode-init default-directory 'log (funcall refresh-func args))
+      (monky-log-select-mode t)
+      (monky-set-buffer-margin)
+      ;; (dolist (window (get-buffer-window-list nil nil 0))
+      ;;   (with-selected-window window
+      ;;     (monky-set-window-margin)
+      ;;     (add-hook 'window-configuration-change-hook
+      ;;               'monky-set-window-margin nil t)))
+      )))
+
+(defvar-local monky-log-select-pick-function nil)
+(defvar-local monky-log-select-quit-function nil)
+
+(defun monky-log-select (pick &optional msg quit branch args initial)
+  (declare (indent defun))
+  (unless initial
+    (setq initial (monky-next-sha1 (point))))
+  (monky-log-select-setup-buffer
+   (list "--rev" "ancestors(.)"))
+  ;; (when initial
+  ;;   (magit-log-goto-commit-section initial))
+  (setq monky-log-select-pick-function pick)
+  (setq monky-log-select-quit-function quit)
+  (when t ; monky-log-select-show-usage
+    (let ((pick (propertize (substitute-command-keys
+                             "\\[monky-log-select-pick]")
+                            ;; 'font-lock-face
+                            ;; 'monky-header-line-key
+                            ))
+          (quit (propertize (substitute-command-keys
+                             "\\[monky-log-select-quit]")
+                            ;; 'font-lock-face
+                            ;; 'monky-header-line-key
+                            )))
+      (setq msg (format-spec
+                 (if msg
+                     (if (string-suffix-p "," msg)
+                         (concat msg " or %q to abort")
+                       msg)
+                   "Type %p to select commit at point, or %q to abort")
+                 `((?p . ,pick)
+                   (?q . ,quit)))))
+    ;; (monky--add-face-text-property
+    ;;  0 (length msg) 'monky-header-line-log-select t msg)
+    ;; (when (memq monky-log-select-show-usage '(both header-line))
+    ;;   (monky-set-header-line-format msg))
+    ;; (when (memq monky-log-select-show-usage '(both echo-area))
+      (message "%s" (substring-no-properties msg)))) ; )
+
+(defun monky-log-select-pick ()
+  "Select the commit at point and act on it.
+Call `monky-log-select-pick-function' with the selected
+commit as argument."
+  (interactive)
+  (let ((fun monky-log-select-pick-function)
+        (rev (monky-section-info (monky-section-at (monky-next-sha1 (point)))))) ;; TODO: this is sloppy.
+    (monky-quit-window 'kill)
+    (funcall fun rev)))
+
+(defun monky-log-select-quit ()
+  "Abort selecting a commit, don't act on any commit."
+  (interactive)
+  (monky-quit-window 'kill)
+  (when monky-log-select-quit-function
+    (funcall monky-log-select-quit-function)))
+
 ;;; Blame mode
 (define-minor-mode monky-blame-mode
   "Minor mode for hg blame.
